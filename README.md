@@ -11,7 +11,8 @@ Slack-inspired layout: folder sidebar, message list with avatars, reader pane, a
 | `src/MailDesk.Mail` | `ImapMailSync`: MailKit implementation of `IMailSync`. Folder list, header sync, body fetch, move, flags, create and delete folder. |
 | `src/MailDesk.Agent` | `AgentProposal`, `IAgentService`, `HeuristicTriageAgent` (local rules, no API key), `ProposalApplier`. |
 | `src/MailDesk.App` | WPF shell (WPF UI, CommunityToolkit MVVM, WebView2 reader). |
-| `tests/MailDesk.Tests` | xUnit tests for the store and the heuristic agent. Synthetic fixtures only. |
+| `src/MailDesk.Calendar` | `IcsCodec` over Ical.Net: invite parsing, recurrence expansion, iTIP replies. |
+| `tests/MailDesk.Tests` | xUnit tests for the store, search, rules, compose, agent toolbox and calendar. Synthetic fixtures only. |
 | `tools/MailDesk.Smoke` | End-to-end smoke test that runs every sync feature against a real account configured in the app. |
 
 ## Run
@@ -81,9 +82,22 @@ local zone, location, organiser, and **Accept / Tentative / Decline**, which sen
 organiser (the same UID and sequence, your participation status) and record the response locally. **Add to calendar**
 saves without replying; **Join meeting** opens the Teams, Zoom, Meet or Webex link found in the invite.
 
-**Calendar** in the top bar opens a month view with a day agenda. Recurring events are expanded through the stored
-VEVENT, so RRULEs and Windows time-zone names from Exchange work. **Import .ics** loads a downloaded invite directly.
-Updates to a meeting replace the stored copy only when their sequence number is not older.
+**Calendar** in the top bar opens the calendar with **Week**, **Month** and **Year** views and a day agenda on the right.
+The week view is a time grid (all-day events in a row above it, overlapping events offset into lanes); the year view shows
+twelve mini months with busy days filled in, and clicking a day or month title jumps to it. Previous/Next step by the
+unit of the current view. Recurring events are expanded through the stored VEVENT, so RRULEs and Windows time-zone names
+from Exchange work. **Import .ics** loads a downloaded invite directly. Updates to a meeting replace the stored copy only
+when their sequence number is not older.
+
+## Search
+
+The search box searches subject, sender and preview text across the whole account. The toggle at its right end switches
+between **All folders** and **This folder**. Folders that were never opened have nothing cached, so an all-folder search
+syncs their headers first (Trash and Junk excepted). Results show a folder badge next to the date.
+
+Folder names are searchable too: typing `finance` lists everything in a folder called Finance as well as mail that
+mentions it, and `in:finance invoice` (or `folder:finance`) limits the text search to folders whose name contains
+"finance". Use an underscore for a space in the folder name: `in:family_school`.
 
 ## Compose, reply, forward
 

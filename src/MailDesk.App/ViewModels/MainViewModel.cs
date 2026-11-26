@@ -328,6 +328,14 @@ public sealed partial class MainViewModel : ObservableObject
 
     // ---------------- Search ----------------
 
+    /// <summary>True searches every folder of the account (syncing any never-opened folder first); false searches the selected folder only.</summary>
+    [ObservableProperty] private bool _searchAllFolders = true;
+
+    partial void OnSearchAllFoldersChanged(bool value)
+    {
+        if (!string.IsNullOrWhiteSpace(SearchText)) _ = SearchAsync();
+    }
+
     [RelayCommand]
     private async Task SearchAsync()
     {
@@ -336,12 +344,34 @@ public sealed partial class MainViewModel : ObservableObject
             await LoadMessagesAsync();
             return;
         }
+        var account = CurrentAccount;
+        if (SearchAllFolders && account is not null && !IsBusy)
+        {
+            // Folders that were never opened have nothing cached, so a whole-account search would silently skip them.
+            var unsynced = Folders.Where(f => f.Account.Id == account.Id && f.Folder.HighestUid == 0 && f.Kind != FolderKind.Trash && f.Kind != FolderKind.Junk).ToList();
+            if (unsynced.Count > 0)
+            {
+                await RunBusyAsync("Syncing folders for search...", async () =>
+                {
+                    foreach (var f in unsynced)
+                    {
+                        StatusText = $"Syncing {f.DisplayName} for search...";
+                        try { await _sync.SyncFolderAsync(f.Account, f.Folder); f.UnreadCount = f.Folder.UnreadCount; }
+                        catch (Exception ex) { StatusText = $"Could not sync {f.DisplayName}: {ex.Message}"; }
+                    }
+                });
+            }
+        }
+
         Messages.Clear();
+        SelectedMessage = null;
         ListTitle = $"Search: {SearchText}";
-        foreach (var m in await _store.SearchAsync(SearchText, SelectedFolder?.Account.Id))
+        var folderId = SearchAllFolders ? null : SelectedFolder?.Folder.Id;
+        foreach (var m in await _store.SearchAsync(SearchText, account?.Id, folderId))
             Messages.Add(m);
-        ListSubtitle = $"{Messages.Count} results";
-        StatusText = $"{Messages.Count} results";
+        var scope = SearchAllFolders ? "all folders" : (SelectedFolder?.DisplayName ?? "this folder");
+        ListSubtitle = $"{Messages.Count} result{(Messages.Count == 1 ? "" : "s")} in {scope}";
+        StatusText = ListSubtitle;
     }
 
     // ---------------- Message actions ----------------

@@ -18,6 +18,8 @@ public sealed class MessageSummary
     public bool HasAttachments { get; set; }
     public long Size { get; set; }
     public string Snippet { get; set; } = "";
+    /// <summary>Display name of the containing folder. Filled by search results only; not a stored column.</summary>
+    public string FolderName { get; set; } = "";
 
     public DateTimeOffset Date => DateTimeOffset.FromUnixTimeMilliseconds(DateUtcMs).ToLocalTime();
     public string FromDisplay => string.IsNullOrWhiteSpace(FromName) ? FromAddress : FromName;

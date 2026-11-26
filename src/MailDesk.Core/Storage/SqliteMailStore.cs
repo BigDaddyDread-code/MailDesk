@@ -493,20 +493,58 @@ public sealed class SqliteMailStore : IMailStore
         finally { _writeLock.Release(); }
     }
 
-    public async Task<IReadOnlyList<MessageSummary>> SearchAsync(string query, long? accountId = null, int limit = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MessageSummary>> SearchAsync(string query, long? accountId = null, long? folderId = null, int limit = 200, CancellationToken ct = default)
     {
-        var fts = ToFtsQuery(query);
-        if (string.IsNullOrWhiteSpace(fts)) return [];
+        var (text, folderTerms) = SplitFolderTerms(query);
+        var fts = ToFtsQuery(text);
+        if (string.IsNullOrWhiteSpace(fts) && folderTerms.Count == 0) return [];
+
+        var where = new List<string>();
+        var args = new DynamicParameters();
+        args.Add("limit", limit);
+        if (accountId is not null) { where.Add("fo.AccountId=@accountId"); args.Add("accountId", accountId); }
+        if (folderId is not null) { where.Add("m.FolderId=@folderId"); args.Add("folderId", folderId); }
+        for (var i = 0; i < folderTerms.Count; i++)
+        {
+            where.Add($"fo.DisplayName LIKE @folder{i} ESCAPE '\\'");
+            args.Add($"folder{i}", "%" + EscapeLike(folderTerms[i]) + "%");
+        }
+        if (!string.IsNullOrWhiteSpace(fts))
+        {
+            args.Add("fts", fts);
+            var match = "m.Id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH @fts)";
+            if (folderTerms.Count == 0)
+            {
+                // No explicit folder filter: a plain word also finds everything in a folder of that name.
+                args.Add("folderLike", "%" + EscapeLike(text.Trim()) + "%");
+                match = $"({match} OR fo.DisplayName LIKE @folderLike ESCAPE '\\')";
+            }
+            where.Add(match);
+        }
+
+        var sql = "SELECT m.*, fo.DisplayName AS FolderName FROM messages m JOIN folders fo ON fo.Id = m.FolderId WHERE "
+                  + string.Join(" AND ", where) + " ORDER BY m.DateUtcMs DESC LIMIT @limit";
         using var conn = Open();
-        var sql = """
-            SELECT m.* FROM messages_fts f
-            JOIN messages m ON m.Id = f.rowid
-            JOIN folders fo ON fo.Id = m.FolderId
-            WHERE messages_fts MATCH @fts
-            """ + (accountId is null ? "" : " AND fo.AccountId=@accountId") + " ORDER BY m.DateUtcMs DESC LIMIT @limit";
-        var rows = await conn.QueryAsync<MessageSummary>(sql, new { fts, accountId, limit });
+        var rows = await conn.QueryAsync<MessageSummary>(sql, args);
         return rows.ToList();
     }
+
+    /// <summary>Pulls "in:name" and "folder:name" tokens out of a query. Returns the remaining text and the folder terms.</summary>
+    public static (string text, List<string> folders) SplitFolderTerms(string query)
+    {
+        var folders = new List<string>();
+        var rest = new List<string>();
+        foreach (var token in (query ?? "").Split([' ', '\t', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var lower = token.ToLowerInvariant();
+            if (lower.StartsWith("in:") && token.Length > 3) folders.Add(token[3..].Replace('_', ' '));
+            else if (lower.StartsWith("folder:") && token.Length > 7) folders.Add(token[7..].Replace('_', ' '));
+            else rest.Add(token);
+        }
+        return (string.Join(' ', rest), folders);
+    }
+
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     /// <summary>Turns free text into a safe FTS5 query: each word becomes a quoted prefix term.</summary>
     public static string ToFtsQuery(string query)

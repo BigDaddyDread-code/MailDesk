@@ -84,6 +84,41 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_matches_folder_names_and_scopes_with_in_prefix()
+    {
+        var (account, inbox) = await SeedAsync();
+        var finance = new MailFolder { AccountId = account.Id, FullName = "Finance", DisplayName = "Finance & Bills", Kind = FolderKind.Other };
+        await _store.UpsertFolderAsync(finance);
+        await _store.UpsertMessagesAsync(
+        [
+            new MessageSummary { FolderId = inbox.Id, Uid = 1, Subject = "Invoice 100", FromAddress = "a@example.test", DateUtcMs = 3 },
+            new MessageSummary { FolderId = finance.Id, Uid = 1, Subject = "Invoice 200", FromAddress = "b@example.test", DateUtcMs = 2 },
+            new MessageSummary { FolderId = finance.Id, Uid = 2, Subject = "Rates notice", FromAddress = "c@example.test", DateUtcMs = 1 },
+        ]);
+
+        // A plain word that is also a folder name returns everything in that folder.
+        var byFolderName = await _store.SearchAsync("finance", account.Id);
+        Assert.Equal(2, byFolderName.Count);
+        Assert.All(byFolderName, m => Assert.Equal("Finance & Bills", m.FolderName));
+
+        // in: narrows the text search to matching folders.
+        var scoped = await _store.SearchAsync("in:finance invoice", account.Id);
+        var hit = Assert.Single(scoped);
+        Assert.Equal("Invoice 200", hit.Subject);
+
+        // in: alone lists the folder.
+        Assert.Equal(2, (await _store.SearchAsync("folder:bills", account.Id)).Count);
+
+        // folderId restricts to one folder regardless of where else the text appears.
+        var inboxOnly = await _store.SearchAsync("invoice", account.Id, folderId: inbox.Id);
+        Assert.Equal("Invoice 100", Assert.Single(inboxOnly).Subject);
+        Assert.Equal("Inbox", inboxOnly[0].FolderName);
+
+        // Results from a normal folder listing have no folder name attached.
+        Assert.All(await _store.GetMessagesAsync(inbox.Id), m => Assert.Equal("", m.FolderName));
+    }
+
+    [Fact]
     public async Task Update_flags_and_sender_stats()
     {
         var (_, folder) = await SeedAsync();

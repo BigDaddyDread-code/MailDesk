@@ -81,21 +81,43 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="White" Opacity="0.8" VerticalAlignment="Center" Margin="10,0,6,0" />
                             <TextBox x:Name="SearchBox" Grid.Column="1" Background="Transparent" BorderThickness="0" Foreground="White" CaretBrush="White"
                                      VerticalContentAlignment="Center" Padding="0" FontSize="13"
-                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" KeyDown="SearchBox_KeyDown">
+                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" KeyDown="SearchBox_KeyDown"
+                                     ToolTip="Searches subject, sender and preview. A folder name finds everything in that folder; in:finance invoice searches only folders called Finance.">
                                 <TextBox.Template>
                                     <ControlTemplate TargetType="TextBox">
                                         <Grid>
-                                            <TextBlock Text="Search mail" Foreground="White" Opacity="0.7" VerticalAlignment="Center" IsHitTestVisible="False"
+                                            <TextBlock Text="Search mail and folders" Foreground="White" Opacity="0.7" VerticalAlignment="Center" IsHitTestVisible="False"
                                                        Visibility="{Binding Text.IsEmpty, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BoolToVisibility}}" />
                                             <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" />
                                         </Grid>
                                     </ControlTemplate>
                                 </TextBox.Template>
                             </TextBox>
+                            <!-- Scope toggle: all folders of the account, or just the selected one -->
+                            <ToggleButton Grid.Column="2" IsChecked="{Binding SearchAllFolders}" Margin="6,3,4,3" Padding="8,0" FontSize="11" Cursor="Hand"
+                                          ToolTip="Click to switch between searching all folders and the selected folder only">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="Bd" Background="#7A3F7B" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                            <TextBlock x:Name="Txt" Text="This folder" Foreground="White" VerticalAlignment="Center" FontSize="{TemplateBinding FontSize}" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Txt" Property="Text" Value="All folders" />
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SidebarSelectedBrush}" />
+                                            </Trigger>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
                         </Grid>
                     </Border>
 
@@ -204,6 +226,12 @@
                                     <TextBlock Grid.Column="1" Text="{Binding FromDisplay}" FontSize="14" Foreground="{StaticResource TextBrush}"
                                                FontWeight="{Binding IsRead, Converter={StaticResource ReadToFontWeight}}" TextTrimming="CharacterEllipsis" />
                                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <!-- Folder badge, shown on search results only -->
+                                        <Border Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="4"
+                                                Padding="5,0" Margin="0,0,6,0" MaxWidth="120"
+                                                Visibility="{Binding FolderName, Converter={StaticResource NonEmptyToVisibility}}">
+                                            <TextBlock Text="{Binding FolderName}" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                                        </Border>
                                         <TextBlock Text="&#xE723;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" Foreground="{StaticResource MutedTextBrush}"
                                                    Visibility="{Binding HasAttachments, Converter={StaticResource BoolToVisibility}}" />
                                         <TextBlock Text="&#xE7C1;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Margin="0,0,6,0" Foreground="#E01E5A"

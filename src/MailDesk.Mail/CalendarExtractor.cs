@@ -18,6 +18,7 @@ public static class CalendarExtractor
                                         || mp.ContentType.IsMimeType("application", "ics")))
             {
                 using var ms = new MemoryStream();
+                if (mp.Content is null) continue;
                 mp.Content.DecodeTo(ms);
                 var text = System.Text.Encoding.UTF8.GetString(ms.ToArray());
                 if (text.Contains("BEGIN:VCALENDAR", StringComparison.OrdinalIgnoreCase)) return text;

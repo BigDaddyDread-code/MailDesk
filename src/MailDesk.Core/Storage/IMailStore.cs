@@ -26,7 +26,13 @@ public interface IMailStore
     Task UpdateFlagsAsync(long messageId, bool? isRead = null, bool? isFlagged = null, CancellationToken ct = default);
     Task MoveMessagesAsync(IEnumerable<long> messageIds, long targetFolderId, CancellationToken ct = default);
     Task DeleteMessagesAsync(IEnumerable<long> messageIds, CancellationToken ct = default);
-    Task<IReadOnlyList<MessageSummary>> SearchAsync(string query, long? accountId = null, int limit = 200, CancellationToken ct = default);
+    /// <summary>
+    /// Full-text search over subject, sender and preview. Results carry <see cref="MessageSummary.FolderName"/>.
+    /// A query also matches folder names: "finance" lists mail in a folder called Finance, and "in:finance invoice"
+    /// (or "folder:finance") limits the text search to folders whose name contains "finance".
+    /// <paramref name="folderId"/> restricts the search to one folder.
+    /// </summary>
+    Task<IReadOnlyList<MessageSummary>> SearchAsync(string query, long? accountId = null, long? folderId = null, int limit = 200, CancellationToken ct = default);
 
     // Bodies
     Task<MessageBody?> GetBodyAsync(long messageId, CancellationToken ct = default);

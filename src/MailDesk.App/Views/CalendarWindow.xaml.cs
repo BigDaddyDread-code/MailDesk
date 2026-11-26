@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Windows;
+using System.Windows.Threading;
 using MailDesk.App.ViewModels;
 using Microsoft.Win32;
 using Wpf.Ui.Controls;
@@ -14,7 +16,27 @@ public partial class CalendarWindow : FluentWindow
         _vm = vm;
         InitializeComponent();
         DataContext = vm;
-        Loaded += async (_, _) => await vm.LoadAsync();
+        Loaded += async (_, _) => { await vm.LoadAsync(); ScrollWeekToMorning(); };
+        vm.PropertyChanged += OnViewModelPropertyChanged;
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CalendarViewModel.View) && _vm.IsWeekView) ScrollWeekToMorning();
+    }
+
+    /// <summary>Opens the week view at 07:00 rather than midnight.</summary>
+    private void ScrollWeekToMorning() =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => WeekScroll.ScrollToVerticalOffset(7 * CalendarViewModel.HourHeight));
+
+    /// <summary>Clicking an event block in the week view selects its day so the agenda shows the details.</summary>
+    private void TimedEvent_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TimedEvent ev })
+        {
+            _vm.SelectedDate = ev.Occurrence.Start.Date;
+            _vm.SelectedOccurrence = ev.Occurrence;
+        }
     }
 
     private async void Import_Click(object sender, RoutedEventArgs e)
