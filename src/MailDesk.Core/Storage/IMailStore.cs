@@ -35,6 +35,10 @@ public interface IMailStore
     // Stats used by the agent
     Task<IReadOnlyList<SenderStat>> GetSenderStatsAsync(long folderId, int top = 100, CancellationToken ct = default);
 
+    // App settings (small key/value pairs; secrets are stored protected by the caller)
+    Task<string?> GetSettingAsync(string key, CancellationToken ct = default);
+    Task SetSettingAsync(string key, string? value, CancellationToken ct = default);
+
     // Rules
     Task<IReadOnlyList<MailRule>> GetRulesAsync(long accountId, CancellationToken ct = default);
     Task<long> UpsertRuleAsync(MailRule rule, CancellationToken ct = default);

@@ -57,6 +57,17 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised by the view to open a compose window. Returns a status line describing what happened, or null.</summary>
     public Func<Account, OutgoingMessage, Task<string?>>? RequestCompose { get; set; }
 
+    /// <summary>Raised by the view to open the AI settings dialog.</summary>
+    public Func<Task>? RequestAiSettings { get; set; }
+
+    [ObservableProperty] private string _agentSummary = "";
+
+    [RelayCommand]
+    private async Task OpenAiSettingsAsync()
+    {
+        if (RequestAiSettings is not null) await RequestAiSettings();
+    }
+
     // ---------------- Compose ----------------
 
     [RelayCommand]
@@ -358,12 +369,14 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (SelectedFolder is null) return;
         IsAgentPaneOpen = true;
+        AgentSummary = "";
         await RunBusyAsync($"{_agent.Name}: reviewing {SelectedFolder.DisplayName}...", async () =>
         {
             Proposals.Clear();
             var proposals = await _agent.ProposeTriageAsync(SelectedFolder.Account.Id, SelectedFolder.Folder.Id);
             foreach (var p in proposals) Proposals.Add(p);
-            StatusText = proposals.Count == 0 ? "Nothing to tidy." : $"{proposals.Count} proposals ready for review.";
+            AgentSummary = _agent.LastRunNote ?? "";
+            StatusText = proposals.Count == 0 ? $"{_agent.Name}: nothing to tidy." : $"{_agent.Name}: {proposals.Count} proposals ready for review.";
         });
     }
 

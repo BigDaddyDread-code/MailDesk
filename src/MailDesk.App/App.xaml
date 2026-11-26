@@ -16,6 +16,7 @@
             <conv:NullToVisibilityConverter x:Key="NullToVisibility" />
             <conv:InitialConverter x:Key="Initial" />
             <conv:InvertBoolConverter x:Key="Invert" />
+            <conv:NonEmptyToVisibilityConverter x:Key="NonEmptyToVisibility" />
             <conv:FileNameConverter x:Key="FileName" />
             <conv:AvatarBrushConverter x:Key="AvatarBrush" />
 

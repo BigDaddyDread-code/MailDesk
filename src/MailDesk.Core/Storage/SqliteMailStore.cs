@@ -53,7 +53,29 @@ public sealed class SqliteMailStore : IMailStore
             HitCount INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS ix_rules_account ON rules(AccountId, SortOrder);
+        CREATE TABLE IF NOT EXISTS settings (
+            Key TEXT PRIMARY KEY,
+            Value TEXT
+        );
         """;
+
+    public async Task<string?> GetSettingAsync(string key, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        return await conn.ExecuteScalarAsync<string?>("SELECT Value FROM settings WHERE Key=@key", new { key });
+    }
+
+    public async Task SetSettingAsync(string key, string? value, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            if (value is null) await conn.ExecuteAsync("DELETE FROM settings WHERE Key=@key", new { key });
+            else await conn.ExecuteAsync("INSERT INTO settings (Key, Value) VALUES (@key, @value) ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value", new { key, value });
+        }
+        finally { _writeLock.Release(); }
+    }
 
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS accounts (

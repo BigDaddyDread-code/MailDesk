@@ -93,9 +93,14 @@
                         </Grid>
                     </Border>
 
-                    <Button Grid.Column="2" Style="{StaticResource TopBarButtonStyle}" Command="{Binding ToggleAgentPaneCommand}" ToolTip="Agent review panel">
-                        <TextBlock Text="&#xE90B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
-                    </Button>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenAiSettingsCommand}" ToolTip="AI settings">
+                            <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                        </Button>
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding ToggleAgentPaneCommand}" ToolTip="Agent review panel">
+                            <TextBlock Text="&#xE90B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </Grid>
         </Border>
@@ -275,8 +280,14 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <TextBlock Text="Agent proposals" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}" />
-                    <TextBlock Grid.Row="1" Margin="0,4,0,12" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" FontSize="12"
-                               Text="Nothing moves until you approve it. Approved moves go to Trash or Junk, never permanent delete." />
+                    <StackPanel Grid.Row="1" Margin="0,4,0,12">
+                        <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" FontSize="12"
+                                   Text="Nothing moves until you approve it. Approved moves go to Trash or Junk, never permanent delete." />
+                        <Border Margin="0,8,0,0" Padding="10" CornerRadius="6" Background="White" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1"
+                                Visibility="{Binding AgentSummary, Converter={StaticResource NonEmptyToVisibility}}">
+                            <TextBlock Text="{Binding AgentSummary}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextBrush}" />
+                        </Border>
+                    </StackPanel>
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Proposals}">
                             <ItemsControl.ItemTemplate>

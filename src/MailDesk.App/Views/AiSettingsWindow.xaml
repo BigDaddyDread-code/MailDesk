@@ -1,0 +1,41 @@
+<ui:FluentWindow x:Class="MailDesk.App.Views.AiSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="AI settings" Width="520" SizeToContent="Height" ResizeMode="NoResize"
+        ExtendsContentIntoTitleBar="True" WindowBackdropType="None" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource SurfaceBrush}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <ui:TitleBar Title="AI settings" ShowMaximize="False" ShowMinimize="False" />
+        <StackPanel Grid.Row="1" Margin="20,8,20,20">
+            <TextBlock Text="Which agent runs 'Tidy with agent'" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <RadioButton x:Name="LocalRadio" Content="Local rules (no network, no cost)" GroupName="Agent" Margin="0,0,0,4" />
+            <RadioButton x:Name="ClaudeRadio" Content="Claude (Anthropic API)" GroupName="Agent" Margin="0,0,0,14" />
+
+            <TextBlock Text="Anthropic API key" FontWeight="SemiBold" Margin="0,0,0,4" />
+            <TextBlock x:Name="KeyStatus" Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,0,0,4" />
+            <ui:PasswordBox x:Name="KeyBox" PlaceholderText="sk-ant-... (leave blank to keep the saved key)" Margin="0,0,0,4" />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,14"
+                       Text="Stored encrypted with Windows DPAPI for your user account. Get a key at console.anthropic.com. The ANTHROPIC_API_KEY environment variable is used when no key is saved." />
+
+            <TextBlock Text="Model" FontWeight="SemiBold" Margin="0,0,0,4" />
+            <ui:TextBox x:Name="ModelBox" Margin="0,0,0,14" />
+
+            <CheckBox x:Name="PreviewsBox" Content="Send the one-line preview of each message along with its headers" Margin="0,0,0,4" />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,14"
+                       Text="Sender, subject and date are always sent for the folder being tidied. Full message bodies are never sent. Claude can only propose; it cannot move, send or delete anything." />
+
+            <TextBlock x:Name="ResultText" TextWrapping="Wrap" Margin="0,0,0,8" />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="TestButton" Content="Test key and model" Click="Test_Click" Padding="14,6" Margin="0,0,8,0" />
+                <Button Content="Cancel" Click="Cancel_Click" Padding="14,6" Margin="0,0,8,0" />
+                <Button x:Name="SaveButton" Content="Save" Click="Save_Click" Style="{StaticResource TopBarPrimaryButtonStyle}" />
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</ui:FluentWindow>

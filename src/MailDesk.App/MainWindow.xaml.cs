@@ -6,6 +6,7 @@ using MailDesk.App.Views;
 using MailDesk.Core.Models;
 using MailDesk.Core.Security;
 using MailDesk.Core.Services;
+using MailDesk.Core.Storage;
 using Wpf.Ui.Controls;
 
 namespace MailDesk.App;
@@ -16,18 +17,21 @@ public partial class MainWindow : FluentWindow
     private readonly IMailSync _sync;
     private readonly ICredentialProtector _protector;
     private readonly IMailSender _sender;
+    private readonly IMailStore _store;
     private bool _readerReady;
 
-    public MainWindow(MainViewModel vm, IMailSync sync, ICredentialProtector protector, IMailSender sender)
+    public MainWindow(MainViewModel vm, IMailSync sync, ICredentialProtector protector, IMailSender sender, IMailStore store)
     {
         _vm = vm;
         _sync = sync;
         _protector = protector;
         _sender = sender;
+        _store = store;
         InitializeComponent();
         DataContext = vm;
         vm.RequestAccountDialog = ShowAccountDialogAsync;
         vm.RequestCompose = ShowComposeAsync;
+        vm.RequestAiSettings = () => { new AiSettingsWindow(_store, _protector) { Owner = this }.ShowDialog(); return Task.CompletedTask; };
         vm.RequestRuleEditor = ShowRuleEditorAsync;
         vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;

@@ -54,6 +54,23 @@ move to a folder (created on first use), move to Trash, mark read, or flag. The 
 
 A rule with no conditions never matches, so a half-finished rule cannot move mail.
 
+## The Claude agent
+
+**Tidy with agent** runs whichever agent is selected in **AI settings** (the gear icon):
+
+- **Local rules**: the heuristic agent, no network, no cost.
+- **Claude**: `ClaudeTriageAgent` calls the Anthropic API (default model `claude-opus-5-5`) with a small tool set
+  over the local cache: `list_folders`, `get_sender_stats`, `list_messages` (filterable by sender or subject),
+  `propose_move`, `propose_rules`, `finish`. The model can only propose; every proposal lands in the same review
+  pane as the local agent's, and `ProposalApplier` is still the only path to the mailbox. Message ids the model
+  sends back are checked against the folder it was given.
+
+What is sent to the API: sender, subject, date, read/flagged state and, if the preview option is on, the one-line
+preview the server already produced. Bodies are never sent. The API key is stored DPAPI-protected in the local
+database, or read from `ANTHROPIC_API_KEY` when none is saved. A run is capped at 30 model turns and reports token
+usage in the review pane. Requests opt in to Anthropic's server-side refusal fallback so a safety-classifier decline is
+re-served by a fallback model instead of failing the run.
+
 ## Compose, reply, forward
 
 **New message** in the top bar opens the compose window: To, Cc/Bcc, subject, plain-text body, file attachments.

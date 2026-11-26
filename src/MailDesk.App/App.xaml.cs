@@ -33,7 +33,9 @@ public partial class App : Application
         services.AddSingleton<ICredentialProtector, DpapiCredentialProtector>();
         services.AddSingleton<IMailSync, ImapMailSync>();
         services.AddSingleton<IMailSender, MailKitSender>();
-        services.AddSingleton<IAgentService, HeuristicTriageAgent>();
+        services.AddSingleton<HeuristicTriageAgent>();
+        services.AddSingleton<ClaudeTriageAgent>();
+        services.AddSingleton<IAgentService, SwitchingAgent>();
         services.AddSingleton<ProposalApplier>();
         services.AddSingleton<MailDesk.Core.Rules.RuleRunner>();
         services.AddSingleton<MainViewModel>();
