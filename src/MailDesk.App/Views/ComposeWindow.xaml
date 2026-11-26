@@ -51,12 +51,48 @@
             <ui:TextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Subject, UpdateSourceTrigger=PropertyChanged}" Margin="0,2" />
         </Grid>
 
-        <!-- Body -->
-        <Border Grid.Row="2" Margin="20,0,20,8" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="6">
-            <TextBox x:Name="BodyBox" Text="{Binding Body, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
-                     VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" Padding="10" FontSize="14"
-                     Foreground="{StaticResource TextBrush}" SpellCheck.IsEnabled="True" />
-        </Border>
+        <!-- Body, with the AI drafting bar above it -->
+        <Grid Grid.Row="2" Margin="20,0,20,8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Padding="10,8" Margin="0,0,0,8" CornerRadius="6" Background="#F3F0FA" BorderBrush="#D9CDEB" BorderThickness="1"
+                    Visibility="{Binding CanDraft, Converter={StaticResource BoolToVisibility}}"
+                    ToolTip="The instructions, the subject, the recipients and the quoted message are sent to the model chosen in AI settings. Nothing is sent to anyone else until you click Send.">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#5B2C5C" VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <TextBox Grid.Column="1" x:Name="AiBox" Text="{Binding AiInstructions, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Background="Transparent"
+                             FontSize="13" VerticalContentAlignment="Center" Foreground="{StaticResource TextBrush}" KeyDown="AiBox_KeyDown"
+                             IsEnabled="{Binding IsDrafting, Converter={StaticResource Invert}}">
+                        <TextBox.Template>
+                            <ControlTemplate TargetType="TextBox">
+                                <Grid>
+                                    <TextBlock Text="Tell the assistant what to say, e.g. 'accept, suggest Thursday instead' (leave empty for a reply)" Foreground="{StaticResource MutedTextBrush}"
+                                               VerticalAlignment="Center" IsHitTestVisible="False" TextTrimming="CharacterEllipsis"
+                                               Visibility="{Binding Text.IsEmpty, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BoolToVisibility}}" />
+                                    <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" />
+                                </Grid>
+                            </ControlTemplate>
+                        </TextBox.Template>
+                    </TextBox>
+                    <ui:ProgressRing Grid.Column="2" IsIndeterminate="True" Width="16" Height="16" Margin="8,0" Visibility="{Binding IsDrafting, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Grid.Column="3" Content="Draft with AI" Padding="12,4" FontSize="12" Command="{Binding DraftWithAiCommand}"
+                            IsEnabled="{Binding IsDrafting, Converter={StaticResource Invert}}" Background="#5B2C5C" Foreground="White" BorderThickness="0" />
+                </Grid>
+            </Border>
+            <Border Grid.Row="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="6">
+                <TextBox x:Name="BodyBox" Text="{Binding Body, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" Padding="10" FontSize="14"
+                         Foreground="{StaticResource TextBrush}" SpellCheck.IsEnabled="True" />
+            </Border>
+        </Grid>
 
         <!-- Attachments -->
         <ItemsControl Grid.Row="3" ItemsSource="{Binding Attachments}" Margin="20,0,20,8">

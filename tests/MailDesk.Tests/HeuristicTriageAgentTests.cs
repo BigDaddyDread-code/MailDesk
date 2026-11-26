@@ -50,4 +50,28 @@ public sealed class HeuristicTriageAgentTests : IAsyncLifetime
         Assert.DoesNotContain(real.Id, allIds);
         Assert.Contains(proposals, p => p.TargetFolderName == "Junk" && p.Count == 1);
     }
+
+    [Fact]
+    public async Task Proposes_tasks_for_unread_mail_that_asks_for_something()
+    {
+        var account = new Account { Name = "T", Email = "t@x", ImapHost = "h", Username = "u", ProtectedPassword = "p" };
+        await _store.UpsertAccountAsync(account);
+        var inbox = new MailFolder { AccountId = account.Id, FullName = "INBOX", DisplayName = "Inbox", Kind = FolderKind.Inbox };
+        await _store.UpsertFolderAsync(inbox);
+        await _store.UpsertMessagesAsync(
+        [
+            new MessageSummary { FolderId = inbox.Id, Uid = 1, FromName = "Council", FromAddress = "rates@council.test", Subject = "Rates invoice for November", IsRead = false },
+            new MessageSummary { FolderId = inbox.Id, Uid = 2, FromName = "Club", FromAddress = "sec@club.test", Subject = "Re: RSVP for the AGM", IsRead = true, IsFlagged = true },
+            new MessageSummary { FolderId = inbox.Id, Uid = 3, FromName = "Shop", FromAddress = "noreply@shop.test", Subject = "Invoice for your order", IsRead = false },
+            new MessageSummary { FolderId = inbox.Id, Uid = 4, FromName = "Pat", FromAddress = "pat@friend.test", Subject = "Photos from Saturday", IsRead = false },
+            new MessageSummary { FolderId = inbox.Id, Uid = 5, FromName = "Bank", FromAddress = "svc@bank.test", Subject = "Payment due reminder", IsRead = true },
+        ]);
+
+        var proposals = await new HeuristicTriageAgent(_store).ProposeTriageAsync(account.Id, inbox.Id);
+        var tasks = Assert.Single(proposals, p => p.Kind == ProposalKind.CreateTask);
+        Assert.Equal(2, tasks.Count); // the no-reply invoice, the read mail and the photos are left out
+        Assert.Contains(tasks.Tasks, t => t.Title == "Pay: Rates invoice for November");
+        Assert.Contains(tasks.Tasks, t => t.Title == "Confirm: RSVP for the AGM");
+        Assert.All(tasks.Tasks, t => Assert.NotNull(t.SourceMessageId));
+    }
 }

@@ -119,6 +119,12 @@
                 </StackPanel>
             </Border>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource TopBarPrimaryButtonStyle}" Command="{Binding NewEventCommand}" Margin="0,0,8,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" FontSize="12" />
+                        <TextBlock Text="New event" />
+                    </StackPanel>
+                </Button>
                 <Button Content="Import .ics" Click="Import_Click" Padding="12,6" Margin="0,0,8,0" />
                 <Button Content="Close" Click="Close_Click" Padding="12,6" />
             </StackPanel>
@@ -455,6 +461,8 @@
                                                     <Button Content="Join" Style="{StaticResource TopBarPrimaryButtonStyle}" Margin="0,0,8,0"
                                                             Visibility="{Binding Item.JoinUrl, Converter={StaticResource NonEmptyToVisibility}}"
                                                             Command="{Binding DataContext.JoinCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                                    <Button Content="Edit" Padding="12,6" Margin="0,0,8,0"
+                                                            Command="{Binding DataContext.EditOccurrenceCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
                                                     <Button Content="Delete" Padding="12,6"
                                                             Command="{Binding DataContext.DeleteOccurrenceCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
                                                 </StackPanel>

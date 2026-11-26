@@ -90,7 +90,82 @@ public sealed class SqliteMailStore : IMailStore
             UNIQUE(AccountId, Uid)
         );
         CREATE INDEX IF NOT EXISTS ix_calendar_start ON calendar_items(AccountId, StartUtcMs);
+        CREATE TABLE IF NOT EXISTS tasks (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            AccountId INTEGER NOT NULL REFERENCES accounts(Id) ON DELETE CASCADE,
+            Title TEXT NOT NULL,
+            Notes TEXT NOT NULL DEFAULT '',
+            DueUtcMs INTEGER,
+            IsDone INTEGER NOT NULL DEFAULT 0,
+            SourceMessageId INTEGER,
+            SourceSubject TEXT NOT NULL DEFAULT '',
+            CreatedUtcMs INTEGER NOT NULL,
+            CompletedUtcMs INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS ix_tasks_account ON tasks(AccountId, IsDone, DueUtcMs);
         """;
+
+    // ---------------- Tasks ----------------
+
+    public async Task<IReadOnlyList<TaskItem>> GetTasksAsync(long accountId, bool includeDone, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var rows = await conn.QueryAsync<TaskItem>(
+            "SELECT * FROM tasks WHERE AccountId=@accountId" + (includeDone ? "" : " AND IsDone=0") +
+            " ORDER BY IsDone, CASE WHEN DueUtcMs IS NULL THEN 1 ELSE 0 END, DueUtcMs, CreatedUtcMs DESC",
+            new { accountId });
+        return rows.ToList();
+    }
+
+    public async Task<long> UpsertTaskAsync(TaskItem task, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            if (task.CreatedUtcMs == 0) task.CreatedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (task.Id == 0)
+            {
+                task.Id = await conn.ExecuteScalarAsync<long>("""
+                    INSERT INTO tasks (AccountId, Title, Notes, DueUtcMs, IsDone, SourceMessageId, SourceSubject, CreatedUtcMs, CompletedUtcMs)
+                    VALUES (@AccountId, @Title, @Notes, @DueUtcMs, @IsDone, @SourceMessageId, @SourceSubject, @CreatedUtcMs, @CompletedUtcMs);
+                    SELECT last_insert_rowid();
+                    """, task);
+            }
+            else
+            {
+                await conn.ExecuteAsync("""
+                    UPDATE tasks SET Title=@Title, Notes=@Notes, DueUtcMs=@DueUtcMs, IsDone=@IsDone, SourceMessageId=@SourceMessageId,
+                        SourceSubject=@SourceSubject, CompletedUtcMs=@CompletedUtcMs WHERE Id=@Id
+                    """, task);
+            }
+            return task.Id;
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    public async Task SetTaskDoneAsync(long taskId, bool done, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            await conn.ExecuteAsync("UPDATE tasks SET IsDone=@done, CompletedUtcMs=@completed WHERE Id=@taskId",
+                new { done, completed = done ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : (long?)null, taskId });
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    public async Task DeleteTaskAsync(long taskId, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            await conn.ExecuteAsync("DELETE FROM tasks WHERE Id=@taskId", new { taskId });
+        }
+        finally { _writeLock.Release(); }
+    }
 
     // ---------------- Calendar ----------------
 

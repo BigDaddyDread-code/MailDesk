@@ -37,6 +37,9 @@ public partial class App : Application
         services.AddSingleton<ClaudeTriageAgent>();
         services.AddSingleton<OpenAITriageAgent>();
         services.AddSingleton<IAgentService, SwitchingAgent>();
+        services.AddSingleton<ClaudeDrafter>();
+        services.AddSingleton<OpenAIDrafter>();
+        services.AddSingleton<IDraftingService, SwitchingDrafter>();
         services.AddSingleton<ProposalApplier>();
         services.AddSingleton<MailDesk.Core.Rules.RuleRunner>();
         services.AddSingleton<MainViewModel>();

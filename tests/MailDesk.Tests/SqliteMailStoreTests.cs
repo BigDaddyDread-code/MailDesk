@@ -84,6 +84,36 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Tasks_round_trip_order_and_completion()
+    {
+        var (account, _) = await SeedAsync();
+        var tomorrow = DateTimeOffset.Now.Date.AddDays(1);
+        var noDue = await _store.UpsertTaskAsync(new TaskItem { AccountId = account.Id, Title = "No deadline" });
+        var due = await _store.UpsertTaskAsync(new TaskItem { AccountId = account.Id, Title = "Pay rates", DueUtcMs = new DateTimeOffset(tomorrow).ToUnixTimeMilliseconds(), SourceSubject = "Rates notice" });
+
+        var open = await _store.GetTasksAsync(account.Id, includeDone: false);
+        Assert.Equal(2, open.Count);
+        Assert.Equal("Pay rates", open[0].Title); // dated tasks come before undated ones
+        Assert.Equal("Tomorrow", open[0].DueText);
+        Assert.False(open[0].IsOverdue);
+
+        await _store.SetTaskDoneAsync(due, true);
+        Assert.Single(await _store.GetTasksAsync(account.Id, includeDone: false));
+        var all = await _store.GetTasksAsync(account.Id, includeDone: true);
+        Assert.Equal(2, all.Count);
+        Assert.True(all.Single(t => t.Id == due).IsDone);
+        Assert.NotNull(all.Single(t => t.Id == due).CompletedUtcMs);
+
+        var edit = all.Single(t => t.Id == noDue);
+        edit.Title = "Renamed";
+        await _store.UpsertTaskAsync(edit);
+        Assert.Contains(await _store.GetTasksAsync(account.Id, true), t => t.Title == "Renamed");
+
+        await _store.DeleteTaskAsync(noDue);
+        Assert.Single(await _store.GetTasksAsync(account.Id, includeDone: true));
+    }
+
+    [Fact]
     public async Task Search_matches_folder_names_and_scopes_with_in_prefix()
     {
         var (account, inbox) = await SeedAsync();

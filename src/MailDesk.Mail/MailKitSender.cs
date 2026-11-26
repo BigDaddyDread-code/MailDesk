@@ -88,13 +88,14 @@ public sealed class MailKitSender : IMailSender
             builder.Attachments.Add(path);
         }
         var body = builder.ToMessageBody();
-        if (!string.IsNullOrWhiteSpace(m.CalendarReplyIcs))
+        if (!string.IsNullOrWhiteSpace(m.CalendarIcs))
         {
-            // iTIP reply: a text/calendar part with method=REPLY is what Exchange, Google and others look for.
-            var calendar = new TextPart("calendar") { Text = m.CalendarReplyIcs };
-            calendar.ContentType.Parameters.Add("method", "REPLY");
+            // iTIP: a text/calendar part with the method parameter is what Exchange, Google and others look for.
+            var method = string.IsNullOrWhiteSpace(m.CalendarMethod) ? "REPLY" : m.CalendarMethod.ToUpperInvariant();
+            var calendar = new TextPart("calendar") { Text = m.CalendarIcs };
+            calendar.ContentType.Parameters.Add("method", method);
             calendar.ContentType.Charset = "utf-8";
-            calendar.ContentDisposition = new ContentDisposition(ContentDisposition.Attachment) { FileName = "reply.ics" };
+            calendar.ContentDisposition = new ContentDisposition(ContentDisposition.Attachment) { FileName = method == "REPLY" ? "reply.ics" : "invite.ics" };
             body = new Multipart("mixed") { body, calendar };
         }
         mime.Body = body;

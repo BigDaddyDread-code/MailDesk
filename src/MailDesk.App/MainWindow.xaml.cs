@@ -18,22 +18,30 @@ public partial class MainWindow : FluentWindow
     private readonly ICredentialProtector _protector;
     private readonly IMailSender _sender;
     private readonly IMailStore _store;
+    private readonly MailDesk.Agent.IDraftingService _drafter;
     private bool _readerReady;
 
-    public MainWindow(MainViewModel vm, IMailSync sync, ICredentialProtector protector, IMailSender sender, IMailStore store)
+    public MainWindow(MainViewModel vm, IMailSync sync, ICredentialProtector protector, IMailSender sender, IMailStore store, MailDesk.Agent.IDraftingService drafter)
     {
         _vm = vm;
         _sync = sync;
         _protector = protector;
         _sender = sender;
         _store = store;
+        _drafter = drafter;
         InitializeComponent();
         DataContext = vm;
         vm.RequestAccountDialog = ShowAccountDialogAsync;
         vm.RequestCompose = ShowComposeAsync;
         vm.RequestAiSettings = () => { new AiSettingsWindow(_store, _protector) { Owner = this }.ShowDialog(); return Task.CompletedTask; };
-        vm.RequestCalendar = account => { new CalendarWindow(new CalendarViewModel(_store, account.Id)) { Owner = this }.Show(); return Task.CompletedTask; };
+        vm.RequestCalendar = account => { new CalendarWindow(new CalendarViewModel(_store, account, _sender)) { Owner = this }.Show(); return Task.CompletedTask; };
         vm.RequestSender = () => _sender;
+        vm.RequestTasks = account =>
+        {
+            var tasksVm = new TasksViewModel(_store, account.Id) { RequestOpenMessage = id => { Activate(); return _vm.OpenMessageAsync(id); } };
+            new TasksWindow(tasksVm) { Owner = this }.Show();
+            return Task.CompletedTask;
+        };
         vm.RequestRuleEditor = ShowRuleEditorAsync;
         vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;
@@ -85,6 +93,69 @@ public partial class MainWindow : FluentWindow
             _vm.SearchCommand.Execute(null);
     }
 
+    // ---------------- Drag messages onto folders ----------------
+
+    private const string MessageDragFormat = "MailDesk.Messages";
+    private Point _dragStart;
+    private MessageSummary? _dragCandidate;
+    private FolderItem? _dropTarget;
+
+    private void MessageList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStart = e.GetPosition(null);
+        var row = System.Windows.Controls.ItemsControl.ContainerFromElement(MessageList, e.OriginalSource as DependencyObject) as System.Windows.Controls.ListViewItem;
+        _dragCandidate = row?.DataContext as MessageSummary;
+    }
+
+    private void MessageList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _dragCandidate is null) return;
+        var delta = e.GetPosition(null) - _dragStart;
+        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        // Drag the whole selection when the pressed row is part of it, otherwise just that row.
+        var selected = MessageList.SelectedItems.Cast<MessageSummary>().ToList();
+        var payload = selected.Contains(_dragCandidate) ? selected : [_dragCandidate];
+        _dragCandidate = null;
+        DragDrop.DoDragDrop(MessageList, new DataObject(MessageDragFormat, payload), DragDropEffects.Move);
+        SetDropTarget(null);
+    }
+
+    private FolderItem? FolderUnder(DragEventArgs e) =>
+        (System.Windows.Controls.ItemsControl.ContainerFromElement(FolderList, e.OriginalSource as DependencyObject) as System.Windows.Controls.ListBoxItem)?.DataContext as FolderItem;
+
+    private void SetDropTarget(FolderItem? folder)
+    {
+        if (ReferenceEquals(_dropTarget, folder)) return;
+        if (_dropTarget is not null) _dropTarget.IsDropTarget = false;
+        _dropTarget = folder;
+        if (_dropTarget is not null) _dropTarget.IsDropTarget = true;
+    }
+
+    private void FolderList_DragOver(object sender, DragEventArgs e)
+    {
+        var folder = FolderUnder(e);
+        var ok = e.Data.GetDataPresent(MessageDragFormat) && folder is not null && _vm.CanDropOn(folder);
+        e.Effects = ok ? DragDropEffects.Move : DragDropEffects.None;
+        SetDropTarget(ok ? folder : null);
+        e.Handled = true;
+    }
+
+    private void FolderList_DragLeave(object sender, DragEventArgs e)
+    {
+        // DragOver on the next item re-highlights; this only clears when the pointer leaves the list.
+        if (FolderUnder(e) is null) SetDropTarget(null);
+    }
+
+    private async void FolderList_Drop(object sender, DragEventArgs e)
+    {
+        var folder = FolderUnder(e);
+        SetDropTarget(null);
+        e.Handled = true;
+        if (folder is null || e.Data.GetData(MessageDragFormat) is not List<MessageSummary> messages) return;
+        await _vm.MoveMessagesAsync(messages, folder);
+    }
+
     /// <summary>The window the user is looking at, so dialogs stack correctly over the rules window too.</summary>
     private Window ActiveOwner() =>
         Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
@@ -111,7 +182,7 @@ public partial class MainWindow : FluentWindow
 
     private Task<string?> ShowComposeAsync(Account account, OutgoingMessage seed)
     {
-        var window = new ComposeWindow(new ComposeViewModel(_sender, account, seed)) { Owner = this };
+        var window = new ComposeWindow(new ComposeViewModel(_sender, account, seed, _drafter)) { Owner = this };
         window.ShowDialog();
         return Task.FromResult(window.Outcome);
     }

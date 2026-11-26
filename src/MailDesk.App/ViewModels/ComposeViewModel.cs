@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MailDesk.Agent;
 using MailDesk.Core.Models;
 using MailDesk.Core.Services;
 
@@ -11,13 +12,15 @@ namespace MailDesk.App.ViewModels;
 public sealed partial class ComposeViewModel : ObservableObject
 {
     private readonly IMailSender _sender;
+    private readonly IDraftingService? _drafter;
     private readonly Account _account;
     private readonly string? _inReplyTo;
     private readonly List<string> _references;
 
-    public ComposeViewModel(IMailSender sender, Account account, OutgoingMessage seed)
+    public ComposeViewModel(IMailSender sender, Account account, OutgoingMessage seed, IDraftingService? drafter = null)
     {
         _sender = sender;
+        _drafter = drafter;
         _account = account;
         _to = seed.To;
         _cc = seed.Cc;
@@ -55,6 +58,70 @@ public sealed partial class ComposeViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleCcBcc() => ShowCcBcc = !ShowCcBcc;
+
+    // ---------------- AI drafting ----------------
+
+    [ObservableProperty] private string _aiInstructions = "";
+    [ObservableProperty] private bool _isDrafting;
+
+    public bool CanDraft => _drafter is not null;
+
+    /// <summary>True when the body holds a quoted original (reply or forward), so the model has something to answer.</summary>
+    public bool HasQuotedOriginal => QuoteStart(Body) >= 0;
+
+    /// <summary>Index where the quoted original begins ("On ... wrote:" or the forwarded-message header), or -1.</summary>
+    private static int QuoteStart(string body)
+    {
+        var lines = body.Replace("\r\n", "\n").Split('\n');
+        var pos = 0;
+        foreach (var line in lines)
+        {
+            var t = line.TrimStart();
+            if ((t.StartsWith("On ") && t.TrimEnd().EndsWith("wrote:")) || t.StartsWith("---------- Forwarded message")) return pos;
+            pos += line.Length + 1;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Asks the configured model for a body. The quoted original and anything already typed go to the model as context;
+    /// the result replaces the text above the quote and keeps the quote, so the thread stays readable.
+    /// </summary>
+    [RelayCommand]
+    private async Task DraftWithAiAsync()
+    {
+        if (_drafter is null) return;
+        var body = Body.Replace("\r\n", "\n");
+        var quoteAt = QuoteStart(body);
+        var quote = quoteAt >= 0 ? body[quoteAt..] : "";
+        var typed = quoteAt >= 0 ? body[..quoteAt] : body;
+        if (string.IsNullOrWhiteSpace(AiInstructions) && string.IsNullOrWhiteSpace(quote) && string.IsNullOrWhiteSpace(typed))
+        {
+            Error = "Tell the assistant what the email should say.";
+            return;
+        }
+        Error = "";
+        IsDrafting = true;
+        try
+        {
+            var context = string.IsNullOrWhiteSpace(typed) ? quote : (typed.Trim() + "\n\n" + quote).Trim();
+            var draft = await _drafter.DraftAsync(new DraftRequest
+            {
+                Instructions = AiInstructions, Subject = Subject, To = To, Context = context, SenderName = _account.Name,
+            });
+            Body = draft.Trim() + (quote.Length > 0 ? "\n\n" + quote : "\n");
+            if (string.IsNullOrWhiteSpace(Subject) && !string.IsNullOrWhiteSpace(AiInstructions))
+                Subject = SubjectFrom(AiInstructions);
+        }
+        catch (Exception ex) { Error = $"Draft failed: {ex.Message}"; }
+        finally { IsDrafting = false; }
+    }
+
+    private static string SubjectFrom(string instructions)
+    {
+        var s = instructions.Trim().TrimEnd('.');
+        return s.Length <= 60 ? char.ToUpper(s[0]) + s[1..] : "";
+    }
 
     public void AddAttachments(IEnumerable<string> paths)
     {

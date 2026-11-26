@@ -18,6 +18,7 @@
             <conv:InvertBoolConverter x:Key="Invert" />
             <conv:NonEmptyToVisibilityConverter x:Key="NonEmptyToVisibility" />
             <conv:ZeroToVisibilityConverter x:Key="ZeroToVisibility" />
+            <conv:InvertedBoolToVisibilityConverter x:Key="InvertedBoolToVisibility" />
             <conv:FileNameConverter x:Key="FileName" />
             <conv:AvatarBrushConverter x:Key="AvatarBrush" />
 
@@ -58,6 +59,10 @@
                                     <Setter TargetName="Bd" Property="Background" Value="{StaticResource SidebarSelectedBrush}" />
                                     <Setter Property="Foreground" Value="White" />
                                 </Trigger>
+                                <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}" />
+                                    <Setter Property="Foreground" Value="White" />
+                                </DataTrigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>

@@ -13,8 +13,10 @@ public sealed class OutgoingMessage
     /// <summary>Message-Id of the message being replied to, for threading.</summary>
     public string? InReplyTo { get; set; }
     public List<string> References { get; set; } = [];
-    /// <summary>iCalendar METHOD:REPLY text to attach as text/calendar, for meeting responses.</summary>
-    public string? CalendarReplyIcs { get; set; }
+    /// <summary>iCalendar text to attach as text/calendar: a REPLY to an invite, or a REQUEST when inviting people.</summary>
+    public string? CalendarIcs { get; set; }
+    /// <summary>iTIP method for <see cref="CalendarIcs"/>: REPLY, REQUEST or CANCEL.</summary>
+    public string CalendarMethod { get; set; } = "REPLY";
 
     public bool IsEmpty => string.IsNullOrWhiteSpace(To) && string.IsNullOrWhiteSpace(Cc) && string.IsNullOrWhiteSpace(Bcc)
         && string.IsNullOrWhiteSpace(Subject) && string.IsNullOrWhiteSpace(TextBody) && Attachments.Count == 0;

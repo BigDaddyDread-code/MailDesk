@@ -1,0 +1,101 @@
+<ui:FluentWindow x:Class="MailDesk.App.Views.EventEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:vm="clr-namespace:MailDesk.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DataContext="{d:DesignInstance Type=vm:EventEditorViewModel}"
+        Title="{Binding WindowTitle}" Width="560" Height="600" MinWidth="480" MinHeight="520"
+        ExtendsContentIntoTitleBar="True" WindowBackdropType="None" WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip" Background="{StaticResource SurfaceBrush}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ui:TitleBar Title="{Binding WindowTitle}" />
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <Grid Margin="20,4,20,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="90" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.Resources>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+                        <Setter Property="VerticalAlignment" Value="Center" />
+                        <Setter Property="Margin" Value="0,0,10,0" />
+                    </Style>
+                </Grid.Resources>
+
+                <TextBlock Text="Title" />
+                <ui:TextBox Grid.Column="1" x:Name="TitleBox" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="What is it?" Margin="0,4" />
+
+                <TextBlock Grid.Row="1" Text="When" VerticalAlignment="Top" Margin="0,12,10,0" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,4">
+                    <CheckBox Content="All day" IsChecked="{Binding AllDay}" Margin="0,0,0,6" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Starts" Width="50" />
+                        <DatePicker Grid.Column="1" SelectedDate="{Binding StartDate}" Margin="0,2" />
+                        <ui:TextBox Grid.Column="2" Text="{Binding StartTime, UpdateSourceTrigger=PropertyChanged}" Width="80" Margin="8,2,0,2" TextAlignment="Center"
+                                    Visibility="{Binding AllDay, Converter={StaticResource InvertedBoolToVisibility}}" />
+                        <TextBlock Grid.Row="1" Text="Ends" Width="50" />
+                        <DatePicker Grid.Row="1" Grid.Column="1" SelectedDate="{Binding EndDate}" Margin="0,2" />
+                        <ui:TextBox Grid.Row="1" Grid.Column="2" Text="{Binding EndTime, UpdateSourceTrigger=PropertyChanged}" Width="80" Margin="8,2,0,2" TextAlignment="Center"
+                                    Visibility="{Binding AllDay, Converter={StaticResource InvertedBoolToVisibility}}" />
+                    </Grid>
+                </StackPanel>
+
+                <TextBlock Grid.Row="2" Text="Where" />
+                <ui:TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Location, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Room, address or a meeting link" Margin="0,4" />
+
+                <TextBlock Grid.Row="3" Text="Invite" VerticalAlignment="Top" Margin="0,12,10,0" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,4">
+                    <ui:TextBox Text="{Binding Attendees, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="pat@example.com, Sam Lee &lt;sam@example.com&gt;" AcceptsReturn="True" MinHeight="54" TextWrapping="Wrap" />
+                    <TextBlock Text="Each person gets an invitation they can accept or decline. Leave empty for a private entry." FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="4" Text="Notes" VerticalAlignment="Top" Margin="0,12,10,0" />
+                <ui:TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="110" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,4" />
+            </Grid>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Padding="20,10" Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Save and send invitations" Style="{StaticResource TopBarPrimaryButtonStyle}" Click="SaveSend_Click" Margin="0,0,8,0"
+                            Visibility="{Binding HasAttendees, Converter={StaticResource BoolToVisibility}}" />
+                    <Button Content="Save" Click="Save_Click" Padding="14,6" Margin="0,0,8,0" />
+                </StackPanel>
+                <TextBlock Grid.Column="1" Text="{Binding Error}" Foreground="#E01E5A" VerticalAlignment="Center" Margin="12,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Error}" />
+                <Button Grid.Column="2" Content="Cancel" Click="Cancel_Click" Padding="14,6" Background="Transparent" />
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

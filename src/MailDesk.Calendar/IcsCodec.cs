@@ -122,6 +122,71 @@ public static class IcsCodec
         return new CalendarSerializer().SerializeToString(reply) ?? "";
     }
 
+    /// <summary>A fresh UID for an event created here. Globally unique, as RFC 5545 asks.</summary>
+    public static string NewUid(string organizerEmail)
+    {
+        var at = organizerEmail.LastIndexOf('@');
+        var domain = at < 0 ? "maildesk.local" : organizerEmail[(at + 1)..];
+        return $"{Guid.NewGuid():N}@{domain}";
+    }
+
+    /// <summary>
+    /// Serialises an event the user organises. With attendees it is a METHOD:REQUEST invitation they can accept or decline
+    /// (RSVP=TRUE); without, a METHOD:PUBLISH entry. The result is also what gets stored as the item's RawIcs.
+    /// </summary>
+    public static string BuildRequest(CalendarItem item, string method = "REQUEST")
+    {
+        var calendar = new Ical.Net.Calendar { Method = item.Attendees.Count == 0 && method == "REQUEST" ? "PUBLISH" : method, ProductId = "-//MailDesk//EN" };
+        var ev = new CalendarEvent
+        {
+            Uid = item.Uid,
+            Sequence = item.Sequence,
+            Summary = item.Summary,
+            Description = string.IsNullOrWhiteSpace(item.Description) ? null : item.Description,
+            Location = string.IsNullOrWhiteSpace(item.Location) ? null : item.Location,
+            DtStamp = new CalDateTime(DateTime.UtcNow, "UTC"),
+            Status = string.Equals(method, "CANCEL", StringComparison.OrdinalIgnoreCase) ? "CANCELLED" : "CONFIRMED",
+        };
+        if (item.AllDay)
+        {
+            ev.Start = new CalDateTime(item.Start.Date);
+            ev.End = new CalDateTime(item.End.Date);
+        }
+        else
+        {
+            ev.Start = new CalDateTime(item.Start.UtcDateTime, "UTC");
+            ev.End = new CalDateTime(item.End.UtcDateTime, "UTC");
+        }
+        if (!string.IsNullOrWhiteSpace(item.OrganizerEmail))
+            ev.Organizer = new Organizer("mailto:" + item.OrganizerEmail) { CommonName = item.OrganizerName };
+        foreach (var a in item.Attendees)
+        {
+            ev.Attendees.Add(new Attendee("mailto:" + a.Email)
+            {
+                CommonName = string.IsNullOrWhiteSpace(a.Name) ? null : a.Name,
+                Role = a.Optional ? "OPT-PARTICIPANT" : "REQ-PARTICIPANT",
+                ParticipationStatus = string.IsNullOrWhiteSpace(a.Status) ? "NEEDS-ACTION" : a.Status,
+                Rsvp = true,
+            });
+        }
+        calendar.Events.Add(ev);
+        return new CalendarSerializer().SerializeToString(calendar) ?? "";
+    }
+
+    /// <summary>Plain-text body for an invitation email, for clients that do not render the calendar part.</summary>
+    public static string InvitationText(CalendarItem item, string organizerName)
+    {
+        var lines = new List<string>
+        {
+            $"{organizerName} has invited you to: {item.Summary}",
+            item.WhenText(),
+        };
+        if (!string.IsNullOrWhiteSpace(item.Location)) lines.Add($"Where: {item.Location}");
+        if (!string.IsNullOrWhiteSpace(item.Description)) { lines.Add(""); lines.Add(item.Description); }
+        if (item.Attendees.Count > 0) { lines.Add(""); lines.Add("Invited: " + string.Join(", ", item.Attendees.Select(a => string.IsNullOrWhiteSpace(a.Name) ? a.Email : a.Name))); }
+        return string.Join("\n", lines);
+    }
+
     public static string ResponseSubject(CalendarItem item, RsvpStatus response) => response switch
     {
         RsvpStatus.Accepted => $"Accepted: {item.Summary}",

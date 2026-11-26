@@ -72,7 +72,50 @@ public sealed class HeuristicTriageAgent : IAgentService
         // scam domains are throwaway, and codes are matched on subject, which is too broad for a standing rule.
         AddRuleProposal(proposals, accountId, folderId, jobs, "job-board alert");
         AddRuleProposal(proposals, accountId, folderId, promos, "promotional");
+        AddTaskProposal(proposals, accountId, folderId, messages.Except(scam).Except(codes).Except(jobs).Except(promos));
         return proposals;
+    }
+
+    private static readonly string[] ActionSubjectMarkers =
+        ["invoice", "overdue", "payment due", "due date", "please pay", "action required", "please respond", "reply by", "rsvp",
+         "please confirm", "confirm your", "sign and return", "complete the form", "renewal", "renew by", "expires on", "deadline"];
+
+    /// <summary>Unread, non-automated mail whose subject asks for something becomes a task proposal (at most ten).</summary>
+    private static void AddTaskProposal(List<AgentProposal> proposals, long accountId, long folderId, IEnumerable<MessageSummary> candidates)
+    {
+        var tasks = candidates
+            .Where(m => !m.IsRead || m.IsFlagged)
+            .Where(m => !m.FromAddress.Contains("noreply", StringComparison.OrdinalIgnoreCase) && !m.FromAddress.Contains("no-reply", StringComparison.OrdinalIgnoreCase))
+            .Where(m => ActionSubjectMarkers.Any(k => m.Subject.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(m => m.DateUtcMs)
+            .Take(10)
+            .Select(m => new TaskItem
+            {
+                AccountId = accountId,
+                Title = TaskTitle(m),
+                Notes = $"From {m.FromDisplay}",
+                SourceMessageId = m.Id,
+                SourceSubject = m.Subject,
+            })
+            .ToList();
+        if (tasks.Count == 0) return;
+        proposals.Add(new AgentProposal
+        {
+            Kind = ProposalKind.CreateTask,
+            Title = $"Add {tasks.Count} task{(tasks.Count == 1 ? "" : "s")} for mail that asks you to do something",
+            Rationale = "Unread or flagged mail whose subject mentions a payment, a reply, a confirmation or a deadline.\n" + string.Join("\n", tasks.Select(t => "• " + t.Title)),
+            AccountId = accountId, SourceFolderId = folderId, Tasks = tasks, MessageIds = tasks.Select(t => t.SourceMessageId!.Value).ToList(),
+        });
+    }
+
+    private static string TaskTitle(MessageSummary m)
+    {
+        var subject = m.Subject.Trim();
+        foreach (var prefix in new[] { "re:", "fw:", "fwd:" })
+            while (subject.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) subject = subject[prefix.Length..].Trim();
+        var s = subject.ToLowerInvariant();
+        var verb = s.Contains("invoice") || s.Contains("pay") || s.Contains("overdue") ? "Pay" : s.Contains("rsvp") || s.Contains("confirm") ? "Confirm" : s.Contains("sign") || s.Contains("form") ? "Return" : "Reply to";
+        return $"{verb}: {subject}";
     }
 
     private void AddRuleProposal(List<AgentProposal> proposals, long accountId, long folderId, List<MessageSummary> bucket, string label)

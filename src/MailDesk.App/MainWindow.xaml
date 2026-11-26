@@ -67,10 +67,16 @@
                                 <TextBlock Text="Rules" />
                             </StackPanel>
                         </Button>
-                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenCalendarCommand}">
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenCalendarCommand}" Margin="0,0,6,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE787;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
                                 <TextBlock Text="Calendar" />
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenTasksCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE73A;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Tasks" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -155,9 +161,10 @@
                         <TextBlock Text="{Binding WorkspaceSubtitle}" Foreground="{StaticResource SidebarTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
                         <TextBlock Text="Folders" Foreground="{StaticResource SidebarTextBrush}" FontSize="13" FontWeight="SemiBold" Margin="0,18,0,0" />
                     </StackPanel>
-                    <ListBox Grid.Row="1" ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder}"
+                    <ListBox Grid.Row="1" x:Name="FolderList" ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder}"
                              Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarItemStyle}"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             AllowDrop="True" DragOver="FolderList_DragOver" DragLeave="FolderList_DragLeave" Drop="FolderList_Drop">
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:FolderItem}">
                                 <Grid>
@@ -192,15 +199,17 @@
                     </StackPanel>
                 </Border>
                 <Border Grid.Row="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
-                    <ListView ItemsSource="{Binding Messages}" SelectedItem="{Binding SelectedMessage}"
+                    <ListView x:Name="MessageList" ItemsSource="{Binding Messages}" SelectedItem="{Binding SelectedMessage}" SelectionMode="Extended"
                               BorderThickness="0" Background="Transparent" ItemContainerStyle="{StaticResource MessageRowStyle}"
                               VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              PreviewMouseLeftButtonDown="MessageList_PreviewMouseLeftButtonDown" PreviewMouseMove="MessageList_PreviewMouseMove">
                         <ListView.Resources>
                             <ContextMenu x:Key="RowMenu">
                                 <MenuItem Header="Toggle flag" Command="{Binding PlacementTarget.Tag.ToggleFlagCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                 <MenuItem Header="Move to Trash" Command="{Binding PlacementTarget.Tag.MoveToTrashCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                 <Separator />
+                                <MenuItem Header="Create task from message" Command="{Binding PlacementTarget.Tag.CreateTaskFromMessageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                 <MenuItem Header="Create rule from sender..." Command="{Binding PlacementTarget.Tag.CreateRuleFromSenderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                             </ContextMenu>
                         </ListView.Resources>

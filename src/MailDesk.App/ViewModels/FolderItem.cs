@@ -32,6 +32,10 @@ public sealed partial class FolderItem : ObservableObject
     [ObservableProperty]
     private int _unreadCount;
 
+    /// <summary>True while messages are being dragged over this folder, for the highlight.</summary>
+    [ObservableProperty]
+    private bool _isDropTarget;
+
     public string UnreadText => UnreadCount > 0 ? UnreadCount.ToString() : "";
     public bool HasUnread => UnreadCount > 0;
 

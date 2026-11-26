@@ -53,6 +53,18 @@ public sealed class ProposalApplier
                         else await _sync.SetFlagsAsync(account, m, isFlagged: true, ct: ct);
                     }
                     break;
+                case ProposalKind.CreateTask:
+                {
+                    // Local only. Skip a task that already exists for the same message with the same title, so re-approving is harmless.
+                    var existing = await _store.GetTasksAsync(account.Id, includeDone: true, ct);
+                    foreach (var task in proposal.Tasks)
+                    {
+                        task.AccountId = account.Id;
+                        var dup = existing.Any(t => string.Equals(t.Title, task.Title, StringComparison.OrdinalIgnoreCase) && t.SourceMessageId == task.SourceMessageId);
+                        if (!dup) await _store.UpsertTaskAsync(task, ct);
+                    }
+                    break;
+                }
                 case ProposalKind.CreateRule:
                 {
                     // Skip rules that already exist with identical conditions and action, so re-approving is harmless.

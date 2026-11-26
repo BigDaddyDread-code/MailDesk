@@ -128,6 +128,38 @@ public sealed class IcsCodecTests
     }
 
     [Fact]
+    public void Request_carries_organizer_and_attendees_and_round_trips()
+    {
+        var start = new DateTimeOffset(2026, 12, 3, 14, 0, 0, TimeSpan.FromHours(13));
+        var item = new CalendarItem
+        {
+            AccountId = 1, Uid = IcsCodec.NewUid("me@mine.test"), Summary = "Planning", Location = "Room 2", Description = "Bring the numbers.",
+            StartUtcMs = start.ToUnixTimeMilliseconds(), EndUtcMs = start.AddMinutes(45).ToUnixTimeMilliseconds(),
+            OrganizerEmail = "me@mine.test", OrganizerName = "Me Myself",
+            Attendees = [new CalendarAttendee("pat@example.test", "Pat", "NEEDS-ACTION", false)],
+        };
+        Assert.EndsWith("@mine.test", item.Uid);
+
+        var ics = IcsCodec.BuildRequest(item);
+        var unfolded = ics.Replace("\r\n ", "");
+        Assert.Contains("METHOD:REQUEST", unfolded);
+        Assert.Contains("ORGANIZER;CN=Me Myself:mailto:me@mine.test", unfolded);
+        Assert.Contains("RSVP=TRUE", unfolded);
+        Assert.Contains("mailto:pat@example.test", unfolded);
+
+        var parsed = Assert.Single(IcsCodec.Parse(ics, 1));
+        Assert.Equal(item.Uid, parsed.Uid);
+        Assert.Equal(item.StartUtcMs, parsed.StartUtcMs);
+        Assert.Equal(item.EndUtcMs, parsed.EndUtcMs);
+        Assert.Equal("Room 2", parsed.Location);
+        Assert.Single(parsed.Attendees);
+
+        item.Attendees = [];
+        Assert.Contains("METHOD:PUBLISH", IcsCodec.BuildRequest(item));
+        Assert.Contains("Planning", IcsCodec.InvitationText(item, "Me Myself"));
+    }
+
+    [Fact]
     public void Calendar_part_is_extracted_from_mime()
     {
         var message = new MimeMessage();

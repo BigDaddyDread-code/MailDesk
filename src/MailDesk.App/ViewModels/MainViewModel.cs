@@ -63,6 +63,51 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised by the view to open the calendar window for an account.</summary>
     public Func<Account, Task>? RequestCalendar { get; set; }
 
+    /// <summary>Raised by the view to show the tasks window.</summary>
+    public Func<Account, Task>? RequestTasks { get; set; }
+
+    [RelayCommand]
+    private async Task OpenTasksAsync()
+    {
+        var account = CurrentAccount;
+        if (RequestTasks is null || account is null) { StatusText = "Add an account first."; return; }
+        await RequestTasks(account);
+    }
+
+    /// <summary>Right-click: one task per message, titled from the subject, linked back to the message.</summary>
+    [RelayCommand]
+    private async Task CreateTaskFromMessageAsync(MessageSummary? message)
+    {
+        if (message is null || SelectedFolder is null) return;
+        var subject = message.Subject.Trim();
+        foreach (var prefix in new[] { "re:", "fw:", "fwd:" })
+            while (subject.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) subject = subject[prefix.Length..].Trim();
+        var task = new TaskItem
+        {
+            AccountId = SelectedFolder.Account.Id,
+            Title = subject.Length == 0 ? $"Follow up with {message.FromDisplay}" : subject,
+            Notes = $"From {message.FromDisplay}, {message.Date:d MMM yyyy}",
+            SourceMessageId = message.Id,
+            SourceSubject = message.Subject,
+        };
+        await _store.UpsertTaskAsync(task);
+        StatusText = $"Task added: {task.Title}";
+    }
+
+    /// <summary>Opens a message by local id, switching folders if needed. Used by the tasks window.</summary>
+    public async Task OpenMessageAsync(long messageId)
+    {
+        var message = await _store.GetMessageAsync(messageId);
+        if (message is null) { StatusText = "That message is no longer in the local cache."; return; }
+        var folder = Folders.FirstOrDefault(f => f.Folder.Id == message.FolderId);
+        if (folder is not null && !ReferenceEquals(folder, SelectedFolder))
+        {
+            SelectedFolder = folder;
+            await LoadMessagesAsync();
+        }
+        SelectedMessage = Messages.FirstOrDefault(m => m.Id == messageId) ?? message;
+    }
+
     // ---------------- Calendar and invites ----------------
 
     [ObservableProperty] private CalendarItem? _invite;
@@ -138,7 +183,7 @@ public sealed partial class MainViewModel : ObservableObject
                 To = Core.Text.ComposeBuilder.Format(invite.OrganizerName, invite.OrganizerEmail),
                 Subject = Calendar.IcsCodec.ResponseSubject(invite, response),
                 TextBody = $"{account.Name} has {response.ToString().ToLowerInvariant()} this meeting: {invite.Summary}\n{invite.WhenText()}",
-                CalendarReplyIcs = ics,
+                CalendarIcs = ics, CalendarMethod = "REPLY",
             });
             invite.MyResponse = response;
             var saved = await _store.UpsertCalendarItemAsync(invite);
@@ -452,6 +497,31 @@ public sealed partial class MainViewModel : ObservableObject
         });
     }
 
+    /// <summary>Whether a drag of messages may land on this folder: same account, and a folder that can hold moved mail.</summary>
+    public bool CanDropOn(FolderItem target) =>
+        SelectedFolder is not null && target.Account.Id == SelectedFolder.Account.Id && target.Kind != FolderKind.Drafts;
+
+    /// <summary>Drag-and-drop move. Messages already in the target are skipped; counts update without a full reload so search results stay put.</summary>
+    public async Task MoveMessagesAsync(IReadOnlyList<MessageSummary> messages, FolderItem target)
+    {
+        var toMove = messages.Where(m => m.FolderId != target.Folder.Id).ToList();
+        if (toMove.Count == 0 || !CanDropOn(target)) return;
+        var label = toMove.Count == 1 ? $"\"{toMove[0].Subject}\"" : $"{toMove.Count} messages";
+        await RunBusyAsync($"Moving {label} to {target.DisplayName}...", async () =>
+        {
+            await _sync.MoveAsync(target.Account, toMove, target.Folder);
+            foreach (var m in toMove)
+            {
+                Messages.Remove(m);
+                if (m.IsRead) continue;
+                var source = Folders.FirstOrDefault(f => f.Folder.Id == m.FolderId);
+                if (source is not null) source.UnreadCount = Math.Max(0, source.UnreadCount - 1);
+                target.UnreadCount++;
+            }
+            StatusText = $"Moved {label} to {target.DisplayName}.";
+        });
+    }
+
     // ---------------- Rules ----------------
 
     private IReadOnlyList<FolderChoice> FolderChoicesFor(Account account) =>
@@ -576,6 +646,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
             Proposals.Remove(proposal);
             if (proposal.Kind == ProposalKind.CreateRule) await LoadRulesAsync();
+            else if (proposal.Kind == ProposalKind.CreateTask) StatusText = $"Added {proposal.Count} task{(proposal.Count == 1 ? "" : "s")}. Open Tasks to see them.";
             else { await ReloadFoldersKeepingSelectionAsync(); await LoadMessagesAsync(); }
         });
     }

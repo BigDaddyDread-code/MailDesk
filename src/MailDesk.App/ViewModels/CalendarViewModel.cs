@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MailDesk.Calendar;
 using MailDesk.Core.Models;
+using MailDesk.Core.Services;
 using MailDesk.Core.Storage;
 
 namespace MailDesk.App.ViewModels;
@@ -74,14 +75,88 @@ public sealed partial class CalendarViewModel : ObservableObject
     public const double TimelineHeight = HourHeight * 24;
 
     private readonly IMailStore _store;
+    private readonly Account _account;
+    private readonly IMailSender? _sender;
     private readonly long _accountId;
     private IReadOnlyList<CalendarOccurrence> _occurrences = [];
 
-    public CalendarViewModel(IMailStore store, long accountId)
+    public CalendarViewModel(IMailStore store, Account account, IMailSender? sender = null)
     {
         _store = store;
-        _accountId = accountId;
+        _account = account;
+        _sender = sender;
+        _accountId = account.Id;
         _selectedDate = DateTime.Today;
+    }
+
+    /// <summary>Set by the window: opens the event editor over the given item and returns whether to send invitations, or null when cancelled.</summary>
+    public Func<CalendarItem, bool, Task<bool?>>? RequestEventEditor { get; set; }
+
+    /// <summary>Events the user organises can be edited; invites from other people only responded to.</summary>
+    public bool IsMine(CalendarItem item) =>
+        string.IsNullOrWhiteSpace(item.OrganizerEmail) || item.OrganizerEmail.Equals(_account.Email, StringComparison.OrdinalIgnoreCase);
+
+    [RelayCommand]
+    private async Task NewEventAsync()
+    {
+        var start = SelectedDate.Date.AddHours(9);
+        var item = new CalendarItem
+        {
+            AccountId = _accountId,
+            Uid = IcsCodec.NewUid(_account.Email),
+            OrganizerEmail = _account.Email,
+            OrganizerName = _account.Name,
+            StartUtcMs = new DateTimeOffset(start, TimeZoneInfo.Local.GetUtcOffset(start)).ToUnixTimeMilliseconds(),
+            EndUtcMs = new DateTimeOffset(start.AddHours(1), TimeZoneInfo.Local.GetUtcOffset(start)).ToUnixTimeMilliseconds(),
+            MyResponse = RsvpStatus.Accepted,
+        };
+        await EditAsync(item, isNew: true);
+    }
+
+    [RelayCommand]
+    private async Task EditOccurrenceAsync(CalendarOccurrence? occ)
+    {
+        if (occ is null) return;
+        if (!IsMine(occ.Item)) { StatusText = "Only events you organise can be edited here. Respond to invitations from the message they arrived in."; return; }
+        await EditAsync(occ.Item, isNew: false);
+    }
+
+    private async Task EditAsync(CalendarItem item, bool isNew)
+    {
+        if (RequestEventEditor is null) return;
+        var hadInvitees = item.Attendees.Count > 0;
+        var send = await RequestEventEditor(item, isNew);
+        if (send is null) return;
+
+        if (!isNew) item.Sequence++;
+        item.Status = "CONFIRMED";
+        item.RawIcs = IcsCodec.BuildRequest(item);
+        var saved = await _store.UpsertCalendarItemAsync(item);
+        SelectedDate = saved.Start.Date;
+        if (View == CalendarView.Year) View = CalendarView.Month; else await LoadAsync();
+        StatusText = isNew ? $"Saved: {saved.Summary}" : $"Updated: {saved.Summary}";
+
+        if (send == true && saved.Attendees.Count > 0)
+        {
+            if (_sender is null) { StatusText = "Saved, but no mail sender is available to send invitations."; return; }
+            try
+            {
+                var subject = (isNew || !hadInvitees ? "Invitation: " : "Updated invitation: ") + saved.Summary;
+                await _sender.SendAsync(_account, new OutgoingMessage
+                {
+                    To = string.Join(", ", saved.Attendees.Select(a => string.IsNullOrWhiteSpace(a.Name) ? a.Email : $"\"{a.Name}\" <{a.Email}>")),
+                    Subject = subject,
+                    TextBody = IcsCodec.InvitationText(saved, _account.Name),
+                    CalendarIcs = saved.RawIcs,
+                    CalendarMethod = "REQUEST",
+                });
+                StatusText = $"{subject} sent to {saved.Attendees.Count} {(saved.Attendees.Count == 1 ? "person" : "people")}.";
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Saved, but sending invitations failed: {ex.Message}";
+            }
+        }
     }
 
     public ObservableCollection<DayCell> Days { get; } = [];

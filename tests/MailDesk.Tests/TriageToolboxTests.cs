@@ -83,6 +83,57 @@ public sealed class TriageToolboxTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Propose_tasks_keeps_only_known_messages_and_parses_due_dates()
+    {
+        var box = new TriageToolbox(_store, _account.Id, _inbox.Id, sharePreviews: false);
+        var lunch = (await _store.GetMessagesAsync(_inbox.Id)).Single(m => m.Uid == 3);
+        var elsewhere = (await _store.GetMessagesAsync(_other.Id)).Single();
+        var result = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("propose_tasks", J(new
+        {
+            title = "Add tasks", rationale = "Replies owed.",
+            tasks = new object[]
+            {
+                new { title = "Reply to Pat about lunch", notes = "Suggest Thursday", due_date = "2026-12-01", message_id = lunch.Id },
+                new { title = "Not in this folder", message_id = elsewhere.Id },
+                new { title = "x", message_id = lunch.Id },
+                new { title = "Bad date is still a task", due_date = "soon", message_id = lunch.Id },
+            },
+        })));
+        Assert.Equal(2, result.GetProperty("tasks").GetInt32());
+        Assert.Equal(3, result.GetProperty("rejected").GetArrayLength());
+
+        var p = Assert.Single(box.Proposals);
+        Assert.Equal(ProposalKind.CreateTask, p.Kind);
+        Assert.Equal(2, p.Count);
+        Assert.Equal(lunch.Id, p.Tasks[0].SourceMessageId);
+        Assert.Equal("Lunch", p.Tasks[0].SourceSubject);
+        Assert.Equal(new DateTime(2026, 12, 1), p.Tasks[0].Due!.Value.Date);
+        Assert.Null(p.Tasks[1].DueUtcMs);
+        Assert.Contains("Reply to Pat about lunch", p.Rationale);
+
+        // Applying is local only and idempotent.
+        var applier = new ProposalApplier(_store, new NoSync());
+        p.Status = ProposalStatus.Approved;
+        await applier.ApplyAsync(p);
+        p.Status = ProposalStatus.Approved;
+        await applier.ApplyAsync(p);
+        Assert.Equal(2, (await _store.GetTasksAsync(_account.Id, true)).Count);
+    }
+
+    /// <summary>Task proposals never touch the server, so a sync that throws proves it.</summary>
+    private sealed class NoSync : MailDesk.Core.Services.IMailSync
+    {
+        public Task TestConnectionAsync(Account account, string password, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task SyncFoldersAsync(Account account, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MessageSummary>> SyncFolderAsync(Account account, MailFolder folder, int initialBatch = 500, IProgress<string>? progress = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<MessageBody> FetchBodyAsync(Account account, MessageSummary message, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task MoveAsync(Account account, IReadOnlyList<MessageSummary> messages, MailFolder target, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task SetFlagsAsync(Account account, MessageSummary message, bool? isRead = null, bool? isFlagged = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<MailFolder> CreateFolderAsync(Account account, string name, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task DeleteFolderAsync(Account account, MailFolder folder, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    [Fact]
     public async Task Propose_rules_validates_each_rule_and_finish_ends_the_run()
     {
         var box = new TriageToolbox(_store, _account.Id, _inbox.Id, sharePreviews: true);

@@ -18,6 +18,10 @@ public static class TriagePrompts
            (field FromAddress, operator Equals, action MoveToTrash) so future mail skips the Inbox.
         4. Optionally propose moving clearly groupable real mail into named folders, for example receipts, bills,
            statements, a school, a club. Only when the grouping is obvious from sender and subject.
+        5. Mail that needs the person to do something: a bill or invoice to pay, a form or document to return, a reply
+           someone is waiting on, an appointment or booking to confirm, a renewal with a date. Propose these with
+           propose_tasks, one task per message, an imperative title, and the due date only when the mail states one.
+           Never make tasks from marketing, notifications or anything you proposed moving.
 
         Never propose moving: personal correspondence, anything from a lawyer, court, government agency, bank, lender,
         debt collector, employer, school or doctor, invoices, statements, contracts, or anything that reads like a reply

@@ -83,6 +83,19 @@ public sealed class TriageToolbox
                     target_folder = new { type = "string", description = "Required for MoveToFolder" },
                 }, required = new[] { "field", "operator", "value", "action" } } },
             }, required = new[] { "title", "rationale", "rules" }, additionalProperties = false }),
+        new("propose_tasks", "Propose to-do items for mail that needs the person to act: a bill to pay, a form to return, a reply owed, a booking to confirm, a deadline. One task per message, with the message id, a short imperative title and the due date if the mail states one. The user reviews and approves; never for marketing or notifications.",
+            new { type = "object", properties = new
+            {
+                title = new { type = "string", description = "One line for the review pane, e.g. 'Add 3 tasks for mail that needs a reply'" },
+                rationale = new { type = "string" },
+                tasks = new { type = "array", items = new { type = "object", properties = new
+                {
+                    title = new { type = "string", description = "Imperative, under 80 characters, e.g. 'Pay the rates notice'" },
+                    notes = new { type = "string", description = "Optional detail: amount, who, what to send" },
+                    due_date = new { type = "string", description = "YYYY-MM-DD if the mail states a deadline, else omit" },
+                    message_id = new { type = "integer", description = "Id from list_messages" },
+                }, required = new[] { "title", "message_id" } } },
+            }, required = new[] { "title", "rationale", "tasks" }, additionalProperties = false }),
         new("finish", "Call when you have made all your proposals. Give a one-paragraph summary for the user.",
             new { type = "object", properties = new { summary = new { type = "string" } }, required = new[] { "summary" }, additionalProperties = false }),
     ];
@@ -103,6 +116,7 @@ public sealed class TriageToolbox
                 "list_messages" => await ListMessagesAsync(Str(input, "from_filter"), Str(input, "subject_filter"), Int(input, "offset", 0, int.MaxValue), Int(input, "limit", 100, 300), ct),
                 "propose_move" => await ProposeMoveAsync(input, ct),
                 "propose_rules" => ProposeRules(input),
+                "propose_tasks" => await ProposeTasksAsync(input, ct),
                 "finish" => Finish(Str(input, "summary") ?? ""),
                 _ => Error($"Unknown tool '{name}'."),
             };
@@ -205,6 +219,47 @@ public sealed class TriageToolbox
             AccountId = _accountId, SourceFolderId = _folderId, Rules = rules,
         });
         return JsonSerializer.Serialize(new { recorded = true, proposal_index = Proposals.Count, rules = rules.Count, rejected = problems });
+    }
+
+    private async Task<string> ProposeTasksAsync(JsonElement input, CancellationToken ct)
+    {
+        var all = await MessagesAsync(ct);
+        var byId = all.ToDictionary(m => m.Id);
+        var tasks = new List<TaskItem>();
+        var problems = new List<string>();
+        if (input.TryGetProperty("tasks", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var t in arr.EnumerateArray())
+            {
+                var title = (Str(t, "title") ?? "").Trim();
+                if (title.Length < 3) { problems.Add("title too short"); continue; }
+                if (!(t.ValueKind == JsonValueKind.Object && t.TryGetProperty("message_id", out var idEl) && idEl.TryGetInt64(out var id)) || !byId.TryGetValue(id, out var source))
+                { problems.Add($"unknown message_id for '{title}'"); continue; }
+                long? due = null;
+                if (Str(t, "due_date") is { Length: > 0 } d)
+                {
+                    if (DateTime.TryParseExact(d, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date))
+                        due = new DateTimeOffset(date, TimeZoneInfo.Local.GetUtcOffset(date)).ToUnixTimeMilliseconds();
+                    else problems.Add($"bad due_date '{d}' ignored");
+                }
+                tasks.Add(new TaskItem
+                {
+                    AccountId = _accountId, Title = title.Length > 120 ? title[..120] : title, Notes = Str(t, "notes") ?? "",
+                    DueUtcMs = due, SourceMessageId = source.Id, SourceSubject = source.Subject,
+                });
+            }
+        }
+        if (tasks.Count == 0) return Error("No valid tasks. " + string.Join("; ", problems));
+        var list = string.Join("\n", tasks.Select(t => "• " + t.Title + (t.DueUtcMs is null ? "" : $" (due {t.DueText})")));
+        Proposals.Add(new AgentProposal
+        {
+            Kind = ProposalKind.CreateTask,
+            Title = Str(input, "title") ?? $"Add {tasks.Count} task{(tasks.Count == 1 ? "" : "s")}",
+            Rationale = ((Str(input, "rationale") ?? "").Trim() + "\n" + list).Trim(),
+            AccountId = _accountId, SourceFolderId = _folderId, Tasks = tasks,
+            MessageIds = tasks.Select(t => t.SourceMessageId!.Value).ToList(),
+        });
+        return JsonSerializer.Serialize(new { recorded = true, proposal_index = Proposals.Count, tasks = tasks.Count, rejected = problems });
     }
 
     private string Finish(string summary)

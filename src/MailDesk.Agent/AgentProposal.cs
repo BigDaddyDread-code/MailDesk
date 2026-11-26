@@ -9,6 +9,7 @@ public enum ProposalKind
     MarkRead,
     Flag,
     CreateRule,
+    CreateTask,
 }
 
 public enum ProposalStatus
@@ -37,9 +38,11 @@ public sealed class AgentProposal
     public string? TargetFolderName { get; init; }
     /// <summary>Rules to save for CreateRule proposals.</summary>
     public IReadOnlyList<MailRule> Rules { get; init; } = [];
+    /// <summary>Tasks to add to the local to-do list for CreateTask proposals.</summary>
+    public IReadOnlyList<TaskItem> Tasks { get; init; } = [];
     public ProposalStatus Status { get; set; } = ProposalStatus.Pending;
     public string? Error { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
 
-    public int Count => Kind == ProposalKind.CreateRule ? Rules.Count : MessageIds.Count;
+    public int Count => Kind switch { ProposalKind.CreateRule => Rules.Count, ProposalKind.CreateTask => Tasks.Count, _ => MessageIds.Count };
 }

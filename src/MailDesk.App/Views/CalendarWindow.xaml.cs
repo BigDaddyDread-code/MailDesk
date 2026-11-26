@@ -18,6 +18,12 @@ public partial class CalendarWindow : FluentWindow
         DataContext = vm;
         Loaded += async (_, _) => { await vm.LoadAsync(); ScrollWeekToMorning(); };
         vm.PropertyChanged += OnViewModelPropertyChanged;
+        vm.RequestEventEditor = (item, isNew) =>
+        {
+            var editor = new EventEditorWindow(new EventEditorViewModel(item, isNew)) { Owner = this };
+            var ok = editor.ShowDialog() == true;
+            return Task.FromResult(ok ? editor.SendInvitations : (bool?)null);
+        };
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

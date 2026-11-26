@@ -36,6 +36,11 @@ public partial class ComposeWindow : FluentWindow
         if (await _vm.SaveDraftAsync()) { _done = true; Close(); }
     }
 
+    private void AiBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter && _vm.DraftWithAiCommand.CanExecute(null)) _vm.DraftWithAiCommand.Execute(null);
+    }
+
     private void Attach_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog { Multiselect = true, Title = "Attach files" };

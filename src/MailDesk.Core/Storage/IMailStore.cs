@@ -53,6 +53,12 @@ public interface IMailStore
     Task SetCalendarResponseAsync(long itemId, RsvpStatus response, CancellationToken ct = default);
     Task DeleteCalendarItemAsync(long itemId, CancellationToken ct = default);
 
+    // Tasks
+    Task<IReadOnlyList<TaskItem>> GetTasksAsync(long accountId, bool includeDone, CancellationToken ct = default);
+    Task<long> UpsertTaskAsync(TaskItem task, CancellationToken ct = default);
+    Task SetTaskDoneAsync(long taskId, bool done, CancellationToken ct = default);
+    Task DeleteTaskAsync(long taskId, CancellationToken ct = default);
+
     // Rules
     Task<IReadOnlyList<MailRule>> GetRulesAsync(long accountId, CancellationToken ct = default);
     Task<long> UpsertRuleAsync(MailRule rule, CancellationToken ct = default);

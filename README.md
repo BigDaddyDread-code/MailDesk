@@ -89,6 +89,36 @@ unit of the current view. Recurring events are expanded through the stored VEVEN
 from Exchange work. **Import .ics** loads a downloaded invite directly. Updates to a meeting replace the stored copy only
 when their sequence number is not older.
 
+**New event** opens the editor: title, all-day or timed start and end, location, notes, and people to invite. **Save** keeps
+a private entry; **Save and send invitations** also emails each person a `METHOD:REQUEST` invitation they can accept or
+decline in their own client. Events you organise have an **Edit** button in the agenda; saving an edit bumps the sequence
+number and can resend the updated invitation. Invitations from other people are responded to from the message they
+arrived in, not edited here.
+
+## Tasks
+
+**Tasks** in the top bar is a local to-do list: add a task with an optional due date, tick it off, delete it, and show or
+hide done ones. Overdue tasks are marked. A task made from a message keeps a link back to it. Three ways in:
+
+- Right-click a message and choose **Create task from message**.
+- **Tidy with agent** proposes tasks for mail that asks for something (a bill, a form, a reply owed, a deadline); the local
+  agent uses subject keywords on unread or flagged mail, the model agents use the `propose_tasks` tool. Approving the
+  proposal adds the tasks and nothing else.
+- Type one into the Tasks window.
+
+## Drag and drop
+
+Drag one or more messages from the list onto a folder in the sidebar to move them. Multi-select with Ctrl or Shift. The
+folder under the pointer highlights green when it can take the drop; Drafts and other accounts' folders refuse it.
+
+## Writing with AI
+
+The compose window has a bar above the body: type what the email should say (or leave it empty when replying) and click
+**Draft with AI**. The model named in AI settings writes the body; the text lands above the quoted original for you to
+edit, and nothing is sent until you click Send. What goes to the model: your instructions, the subject, the recipients,
+and the quoted message with anything already typed. With the local agent selected, the bar asks you to choose Claude or
+OpenAI first.
+
 ## Search
 
 The search box searches subject, sender and preview text across the whole account. The toggle at its right end switches
@@ -114,7 +144,8 @@ text plus a minimal HTML alternative so other clients keep the line breaks.
 
 - The UI reads only from the local store. The sync layer is the only thing that talks to the server.
 - The agent only proposes. `ProposalApplier` is the single path from proposal to mailbox, and it goes through `IMailSync`.
-- Agent moves target Trash or Junk, never permanent delete. Sending mail is never an agent tool.
+- Agent moves target Trash or Junk, never permanent delete. Sending mail is never an agent tool; the drafting assistant
+  only returns text into the compose window.
 - `DeleteFolderAsync` refuses special folders (Inbox, Sent, Drafts, Trash, Junk, Archive).
 - HTML mail renders in WebView2 with scripts off and a CSP that blocks remote images, on a white background.
   A bar above such a message offers **Show images** (this message only) or **Always show from this sender**
