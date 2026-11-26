@@ -1,0 +1,186 @@
+<ui:FluentWindow x:Class="MailDesk.App.Views.CalendarWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:vm="clr-namespace:MailDesk.App.ViewModels"
+        xmlns:models="clr-namespace:MailDesk.Core.Models;assembly=MailDesk.Core"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DataContext="{d:DesignInstance Type=vm:CalendarViewModel}"
+        Title="Calendar" Width="1100" Height="720" MinWidth="820" MinHeight="520"
+        ExtendsContentIntoTitleBar="True" WindowBackdropType="None" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource SurfaceBrush}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ui:TitleBar Title="Calendar" />
+
+        <!-- Toolbar -->
+        <Grid Grid.Row="1" Margin="16,4,16,8">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="&#xE76B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding PreviousMonthCommand}" Padding="10,6" Background="Transparent" BorderThickness="0" />
+                <TextBlock Text="{Binding MonthTitle}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" MinWidth="180" TextAlignment="Center" />
+                <Button Content="&#xE76C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding NextMonthCommand}" Padding="10,6" Background="Transparent" BorderThickness="0" />
+                <Button Content="Today" Command="{Binding TodayCommand}" Padding="12,6" Margin="12,0,0,0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Import .ics" Click="Import_Click" Padding="12,6" Margin="0,0,8,0" />
+                <Button Content="Close" Click="Close_Click" Padding="12,6" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="16,0,16,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="320" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Month grid -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <ItemsControl ItemsSource="{Binding WeekdayNames}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><UniformGrid Columns="7" Rows="1" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" Margin="8,0,0,4" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <ItemsControl Grid.Row="1" ItemsSource="{Binding Days}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><UniformGrid Columns="7" Rows="6" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:DayCell}">
+                            <Button Command="{Binding DataContext.SelectDayCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                    Padding="0" Margin="1" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" BorderThickness="1"
+                                    BorderBrush="{StaticResource DividerBrush}" Background="{StaticResource SurfaceBrush}">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
+                                                        <ContentPresenter />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
+                                                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceAltBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SidebarSelectedBrush}" />
+                                                            <Setter TargetName="Bd" Property="BorderThickness" Value="2" />
+                                                        </DataTrigger>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </Button.Style>
+                                <Grid Margin="6,4">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Border Width="22" Height="22" CornerRadius="11" HorizontalAlignment="Left">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                        <Setter Property="Background" Value="#E01E5A" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding DayNumber}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsToday}" Value="True"><Setter Property="Foreground" Value="White" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False"><Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" /></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Border>
+                                    <StackPanel Grid.Row="1" Margin="0,2,0,0">
+                                        <ItemsControl ItemsSource="{Binding Occurrences}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type models:CalendarOccurrence}">
+                                                    <Border Background="{StaticResource SidebarSelectedBrush}" CornerRadius="3" Padding="4,1" Margin="0,0,0,2">
+                                                        <TextBlock FontSize="11" Foreground="White" TextTrimming="CharacterEllipsis">
+                                                            <Run Text="{Binding Start, Mode=OneWay, StringFormat='{}{0:HH:mm}'}" /><Run Text=" " /><Run Text="{Binding Item.Summary, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+
+            <!-- Agenda -->
+            <Border Grid.Column="1" Margin="12,0,0,0" Padding="14" Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="{Binding AgendaTitle}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10" />
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Agenda}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type models:CalendarOccurrence}">
+                                    <Border Margin="0,0,0,10" Padding="12" CornerRadius="8" Background="White" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Item.Summary}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
+                                            <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,2,0,0">
+                                                <Run Text="{Binding Start, Mode=OneWay, StringFormat='{}{0:HH:mm}'}" /><Run Text=" to " /><Run Text="{Binding End, Mode=OneWay, StringFormat='{}{0:HH:mm}'}" />
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Item.Location}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
+                                            <TextBlock FontSize="12" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,0">
+                                                <Run Text="Organiser: " /><Run Text="{Binding Item.OrganizerName, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <TextBlock FontSize="12" Foreground="{StaticResource MutedTextBrush}">
+                                                <Run Text="Your response: " /><Run Text="{Binding Item.MyResponse, Mode=OneWay}" />
+                                            </TextBlock>
+                                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                <Button Content="Join" Style="{StaticResource TopBarPrimaryButtonStyle}" Margin="0,0,8,0"
+                                                        Visibility="{Binding Item.JoinUrl, Converter={StaticResource NonEmptyToVisibility}}"
+                                                        Command="{Binding DataContext.JoinCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                                <Button Content="Delete" Padding="12,6"
+                                                        Command="{Binding DataContext.DeleteOccurrenceCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="3" Padding="16,6" Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Margin="0,8,0,0">
+            <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+        </Border>
+    </Grid>
+</ui:FluentWindow>

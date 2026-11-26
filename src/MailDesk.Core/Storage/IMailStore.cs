@@ -39,6 +39,14 @@ public interface IMailStore
     Task<string?> GetSettingAsync(string key, CancellationToken ct = default);
     Task SetSettingAsync(string key, string? value, CancellationToken ct = default);
 
+    // Calendar
+    Task<IReadOnlyList<CalendarItem>> GetCalendarItemsAsync(long accountId, long fromUtcMs, long toUtcMs, CancellationToken ct = default);
+    Task<CalendarItem?> GetCalendarItemAsync(long accountId, string uid, CancellationToken ct = default);
+    /// <summary>Inserts or updates by (AccountId, Uid). An older Sequence never overwrites a newer one; the response is preserved on update.</summary>
+    Task<CalendarItem> UpsertCalendarItemAsync(CalendarItem item, CancellationToken ct = default);
+    Task SetCalendarResponseAsync(long itemId, RsvpStatus response, CancellationToken ct = default);
+    Task DeleteCalendarItemAsync(long itemId, CancellationToken ct = default);
+
     // Rules
     Task<IReadOnlyList<MailRule>> GetRulesAsync(long accountId, CancellationToken ct = default);
     Task<long> UpsertRuleAsync(MailRule rule, CancellationToken ct = default);

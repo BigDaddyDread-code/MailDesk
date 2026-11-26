@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\MailDesk.Core\MailDesk.Core.csproj" />
     <ProjectReference Include="..\..\src\MailDesk.Mail\MailDesk.Mail.csproj" />
     <ProjectReference Include="..\..\src\MailDesk.Agent\MailDesk.Agent.csproj" />
+    <ProjectReference Include="..\..\src\MailDesk.Calendar\MailDesk.Calendar.csproj" />
   </ItemGroup>
 
 </Project>

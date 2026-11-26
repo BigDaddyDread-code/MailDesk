@@ -37,6 +37,15 @@ public sealed class SqliteMailStore : IMailStore
         await conn.ExecuteAsync("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
         await conn.ExecuteAsync(Schema);
         await conn.ExecuteAsync(RulesSchema);
+        await AddColumnIfMissingAsync(conn, "bodies", "CalendarIcs", "TEXT");
+    }
+
+    /// <summary>Tiny forward-only migration: CREATE TABLE IF NOT EXISTS never adds columns to existing databases.</summary>
+    private static async Task AddColumnIfMissingAsync(SqliteConnection conn, string table, string column, string type)
+    {
+        var cols = (await conn.QueryAsync<string>($"SELECT name FROM pragma_table_info('{table}')")).ToList();
+        if (!cols.Contains(column, StringComparer.OrdinalIgnoreCase))
+            await conn.ExecuteAsync($"ALTER TABLE {table} ADD COLUMN {column} {type}");
     }
 
     private const string RulesSchema = """
@@ -57,7 +66,146 @@ public sealed class SqliteMailStore : IMailStore
             Key TEXT PRIMARY KEY,
             Value TEXT
         );
+        CREATE TABLE IF NOT EXISTS calendar_items (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            AccountId INTEGER NOT NULL REFERENCES accounts(Id) ON DELETE CASCADE,
+            Uid TEXT NOT NULL,
+            Sequence INTEGER NOT NULL DEFAULT 0,
+            Summary TEXT NOT NULL DEFAULT '',
+            Description TEXT NOT NULL DEFAULT '',
+            Location TEXT NOT NULL DEFAULT '',
+            StartUtcMs INTEGER NOT NULL,
+            EndUtcMs INTEGER NOT NULL,
+            AllDay INTEGER NOT NULL DEFAULT 0,
+            OrganizerEmail TEXT NOT NULL DEFAULT '',
+            OrganizerName TEXT NOT NULL DEFAULT '',
+            AttendeesJson TEXT NOT NULL DEFAULT '[]',
+            JoinUrl TEXT,
+            RecurrenceRule TEXT,
+            Status TEXT NOT NULL DEFAULT 'CONFIRMED',
+            MyResponse TEXT NOT NULL DEFAULT 'NeedsAction',
+            SourceMessageId INTEGER,
+            RawIcs TEXT NOT NULL DEFAULT '',
+            UpdatedUtcMs INTEGER NOT NULL,
+            UNIQUE(AccountId, Uid)
+        );
+        CREATE INDEX IF NOT EXISTS ix_calendar_start ON calendar_items(AccountId, StartUtcMs);
         """;
+
+    // ---------------- Calendar ----------------
+
+    private sealed class CalendarRow
+    {
+        public long Id { get; set; }
+        public long AccountId { get; set; }
+        public string Uid { get; set; } = "";
+        public int Sequence { get; set; }
+        public string Summary { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string Location { get; set; } = "";
+        public long StartUtcMs { get; set; }
+        public long EndUtcMs { get; set; }
+        public bool AllDay { get; set; }
+        public string OrganizerEmail { get; set; } = "";
+        public string OrganizerName { get; set; } = "";
+        public string AttendeesJson { get; set; } = "[]";
+        public string? JoinUrl { get; set; }
+        public string? RecurrenceRule { get; set; }
+        public string Status { get; set; } = "CONFIRMED";
+        public string MyResponse { get; set; } = "NeedsAction";
+        public long? SourceMessageId { get; set; }
+        public string RawIcs { get; set; } = "";
+        public long UpdatedUtcMs { get; set; }
+
+        public CalendarItem ToItem() => new()
+        {
+            Id = Id, AccountId = AccountId, Uid = Uid, Sequence = Sequence, Summary = Summary, Description = Description, Location = Location,
+            StartUtcMs = StartUtcMs, EndUtcMs = EndUtcMs, AllDay = AllDay, OrganizerEmail = OrganizerEmail, OrganizerName = OrganizerName,
+            Attendees = System.Text.Json.JsonSerializer.Deserialize<List<CalendarAttendee>>(AttendeesJson) ?? [],
+            JoinUrl = JoinUrl, RecurrenceRule = RecurrenceRule, Status = Status,
+            MyResponse = Enum.TryParse<RsvpStatus>(MyResponse, out var r) ? r : RsvpStatus.NeedsAction,
+            SourceMessageId = SourceMessageId, RawIcs = RawIcs, UpdatedUtcMs = UpdatedUtcMs,
+        };
+    }
+
+    public async Task<IReadOnlyList<CalendarItem>> GetCalendarItemsAsync(long accountId, long fromUtcMs, long toUtcMs, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        // Recurring items are returned regardless of their first start so the caller can expand them into the window.
+        var rows = await conn.QueryAsync<CalendarRow>("""
+            SELECT * FROM calendar_items WHERE AccountId=@accountId
+              AND ((EndUtcMs >= @fromUtcMs AND StartUtcMs <= @toUtcMs) OR (RecurrenceRule IS NOT NULL AND StartUtcMs <= @toUtcMs))
+            ORDER BY StartUtcMs
+            """, new { accountId, fromUtcMs, toUtcMs });
+        return rows.Select(r => r.ToItem()).ToList();
+    }
+
+    public async Task<CalendarItem?> GetCalendarItemAsync(long accountId, string uid, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var row = await conn.QuerySingleOrDefaultAsync<CalendarRow>("SELECT * FROM calendar_items WHERE AccountId=@accountId AND Uid=@uid", new { accountId, uid });
+        return row?.ToItem();
+    }
+
+    public async Task<CalendarItem> UpsertCalendarItemAsync(CalendarItem item, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            var existing = await conn.QuerySingleOrDefaultAsync<CalendarRow>("SELECT * FROM calendar_items WHERE AccountId=@AccountId AND Uid=@Uid", item);
+            if (existing is not null && existing.Sequence > item.Sequence)
+                return existing.ToItem();
+
+            item.UpdatedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var p = new
+            {
+                item.AccountId, item.Uid, item.Sequence, item.Summary, item.Description, item.Location, item.StartUtcMs, item.EndUtcMs, item.AllDay,
+                item.OrganizerEmail, item.OrganizerName, AttendeesJson = System.Text.Json.JsonSerializer.Serialize(item.Attendees),
+                item.JoinUrl, item.RecurrenceRule, item.Status,
+                MyResponse = (existing is not null && item.MyResponse == RsvpStatus.NeedsAction ? existing.MyResponse : item.MyResponse.ToString()),
+                SourceMessageId = item.SourceMessageId ?? existing?.SourceMessageId, item.RawIcs, item.UpdatedUtcMs,
+            };
+            item.Id = await conn.ExecuteScalarAsync<long>("""
+                INSERT INTO calendar_items (AccountId, Uid, Sequence, Summary, Description, Location, StartUtcMs, EndUtcMs, AllDay, OrganizerEmail, OrganizerName,
+                    AttendeesJson, JoinUrl, RecurrenceRule, Status, MyResponse, SourceMessageId, RawIcs, UpdatedUtcMs)
+                VALUES (@AccountId, @Uid, @Sequence, @Summary, @Description, @Location, @StartUtcMs, @EndUtcMs, @AllDay, @OrganizerEmail, @OrganizerName,
+                    @AttendeesJson, @JoinUrl, @RecurrenceRule, @Status, @MyResponse, @SourceMessageId, @RawIcs, @UpdatedUtcMs)
+                ON CONFLICT(AccountId, Uid) DO UPDATE SET
+                    Sequence=excluded.Sequence, Summary=excluded.Summary, Description=excluded.Description, Location=excluded.Location,
+                    StartUtcMs=excluded.StartUtcMs, EndUtcMs=excluded.EndUtcMs, AllDay=excluded.AllDay, OrganizerEmail=excluded.OrganizerEmail,
+                    OrganizerName=excluded.OrganizerName, AttendeesJson=excluded.AttendeesJson, JoinUrl=excluded.JoinUrl, RecurrenceRule=excluded.RecurrenceRule,
+                    Status=excluded.Status, MyResponse=excluded.MyResponse, SourceMessageId=excluded.SourceMessageId, RawIcs=excluded.RawIcs, UpdatedUtcMs=excluded.UpdatedUtcMs;
+                SELECT Id FROM calendar_items WHERE AccountId=@AccountId AND Uid=@Uid;
+                """, p);
+            item.MyResponse = Enum.Parse<RsvpStatus>(p.MyResponse);
+            return item;
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    public async Task SetCalendarResponseAsync(long itemId, RsvpStatus response, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            await conn.ExecuteAsync("UPDATE calendar_items SET MyResponse=@r, UpdatedUtcMs=@now WHERE Id=@itemId",
+                new { r = response.ToString(), now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), itemId });
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    public async Task DeleteCalendarItemAsync(long itemId, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            await conn.ExecuteAsync("DELETE FROM calendar_items WHERE Id=@itemId", new { itemId });
+        }
+        finally { _writeLock.Release(); }
+    }
 
     public async Task<string?> GetSettingAsync(string key, CancellationToken ct = default)
     {
@@ -131,6 +279,7 @@ public sealed class SqliteMailStore : IMailStore
             MessageId INTEGER PRIMARY KEY REFERENCES messages(Id) ON DELETE CASCADE,
             TextBody TEXT,
             HtmlBody TEXT,
+            CalendarIcs TEXT,
             FetchedUtcMs INTEGER NOT NULL
         );
 
@@ -385,8 +534,8 @@ public sealed class SqliteMailStore : IMailStore
             using var conn = Open();
             body.FetchedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             await conn.ExecuteAsync("""
-                INSERT INTO bodies (MessageId, TextBody, HtmlBody, FetchedUtcMs) VALUES (@MessageId, @TextBody, @HtmlBody, @FetchedUtcMs)
-                ON CONFLICT(MessageId) DO UPDATE SET TextBody=excluded.TextBody, HtmlBody=excluded.HtmlBody, FetchedUtcMs=excluded.FetchedUtcMs
+                INSERT INTO bodies (MessageId, TextBody, HtmlBody, CalendarIcs, FetchedUtcMs) VALUES (@MessageId, @TextBody, @HtmlBody, @CalendarIcs, @FetchedUtcMs)
+                ON CONFLICT(MessageId) DO UPDATE SET TextBody=excluded.TextBody, HtmlBody=excluded.HtmlBody, CalendarIcs=excluded.CalendarIcs, FetchedUtcMs=excluded.FetchedUtcMs
                 """, body);
         }
         finally { _writeLock.Release(); }

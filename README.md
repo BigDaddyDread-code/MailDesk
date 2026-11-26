@@ -73,6 +73,18 @@ database, or read from `ANTHROPIC_API_KEY` when none is saved. A run is capped a
 usage in the review pane. Requests opt in to Anthropic's server-side refusal fallback so a safety-classifier decline is
 re-served by a fallback model instead of failing the run.
 
+## Calendar and meeting invites
+
+`MailDesk.Calendar` wraps Ical.Net. When a message carries a `text/calendar` part or an `.ics` attachment, the sync
+layer keeps the raw iCalendar text with the cached body, and the reader shows an invite card: title, time in your
+local zone, location, organiser, and **Accept / Tentative / Decline**, which send an iTIP `METHOD:REPLY` to the
+organiser (the same UID and sequence, your participation status) and record the response locally. **Add to calendar**
+saves without replying; **Join meeting** opens the Teams, Zoom, Meet or Webex link found in the invite.
+
+**Calendar** in the top bar opens a month view with a day agenda. Recurring events are expanded through the stored
+VEVENT, so RRULEs and Windows time-zone names from Exchange work. **Import .ics** loads a downloaded invite directly.
+Updates to a meeting replace the stored copy only when their sequence number is not older.
+
 ## Compose, reply, forward
 
 **New message** in the top bar opens the compose window: To, Cc/Bcc, subject, plain-text body, file attachments.

@@ -4,6 +4,7 @@
     <ProjectReference Include="..\MailDesk.Core\MailDesk.Core.csproj" />
     <ProjectReference Include="..\MailDesk.Mail\MailDesk.Mail.csproj" />
     <ProjectReference Include="..\MailDesk.Agent\MailDesk.Agent.csproj" />
+    <ProjectReference Include="..\MailDesk.Calendar\MailDesk.Calendar.csproj" />
   </ItemGroup>
 
   <ItemGroup>

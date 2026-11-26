@@ -29,5 +29,7 @@ public sealed class MessageBody
     public long MessageId { get; set; }
     public string? TextBody { get; set; }
     public string? HtmlBody { get; set; }
+    /// <summary>Raw iCalendar text when the message carries a text/calendar part or an .ics attachment.</summary>
+    public string? CalendarIcs { get; set; }
     public long FetchedUtcMs { get; set; }
 }

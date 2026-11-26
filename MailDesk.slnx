@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/MailDesk.Agent/MailDesk.Agent.csproj" />
     <Project Path="src/MailDesk.App/MailDesk.App.csproj" />
+    <Project Path="src/MailDesk.Calendar/MailDesk.Calendar.csproj" />
     <Project Path="src/MailDesk.Core/MailDesk.Core.csproj" />
     <Project Path="src/MailDesk.Mail/MailDesk.Mail.csproj" />
   </Folder>

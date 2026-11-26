@@ -87,7 +87,17 @@ public sealed class MailKitSender : IMailSender
             if (!File.Exists(path)) throw new FileNotFoundException($"Attachment not found: {path}");
             builder.Attachments.Add(path);
         }
-        mime.Body = builder.ToMessageBody();
+        var body = builder.ToMessageBody();
+        if (!string.IsNullOrWhiteSpace(m.CalendarReplyIcs))
+        {
+            // iTIP reply: a text/calendar part with method=REPLY is what Exchange, Google and others look for.
+            var calendar = new TextPart("calendar") { Text = m.CalendarReplyIcs };
+            calendar.ContentType.Parameters.Add("method", "REPLY");
+            calendar.ContentType.Charset = "utf-8";
+            calendar.ContentDisposition = new ContentDisposition(ContentDisposition.Attachment) { FileName = "reply.ics" };
+            body = new Multipart("mixed") { body, calendar };
+        }
+        mime.Body = body;
         return mime;
     }
 

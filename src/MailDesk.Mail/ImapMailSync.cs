@@ -195,7 +195,7 @@ public sealed class ImapMailSync : IMailSync
         MimeMessage mime = await remote.GetMessageAsync(new UniqueId((uint)message.Uid), ct);
         await client.DisconnectAsync(true, ct);
 
-        var body = new MessageBody { MessageId = message.Id, HtmlBody = mime.HtmlBody, TextBody = mime.TextBody };
+        var body = new MessageBody { MessageId = message.Id, HtmlBody = mime.HtmlBody, TextBody = mime.TextBody, CalendarIcs = CalendarExtractor.Extract(mime) };
         await _store.SaveBodyAsync(body, ct);
         return body;
     }

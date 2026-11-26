@@ -186,6 +186,26 @@ await Step("9. SMTP sign-in and save a draft (nothing is sent)", async () =>
     if (trash is not null) { await sync.MoveAsync(account, [draft], trash); Console.WriteLine("   draft moved to Trash"); }
 });
 
+var icsPath = Environment.GetEnvironmentVariable("MAILDESK_SMOKE_ICS");
+if (!string.IsNullOrWhiteSpace(icsPath))
+{
+    await Step("10. Parse an .ics file (MAILDESK_SMOKE_ICS) and build a reply", async () =>
+    {
+        var ics = await File.ReadAllTextAsync(icsPath);
+        var items = MailDesk.Calendar.IcsCodec.Parse(ics, account.Id);
+        Require(items.Count > 0, "no events found");
+        foreach (var it in items)
+        {
+            Console.WriteLine($"   {it.Summary}");
+            Console.WriteLine($"   when: {it.WhenText()}  organiser: {it.OrganizerName} <{it.OrganizerEmail}>  attendees: {it.Attendees.Count}  seq: {it.Sequence}");
+            Console.WriteLine($"   join: {it.JoinUrl ?? "(none)"}  recurring: {it.IsRecurring}");
+            var reply = MailDesk.Calendar.IcsCodec.BuildReply(it, account.Email, account.Name, RsvpStatus.Tentative);
+            Require(reply.Contains("METHOD:REPLY") && reply.Contains("PARTSTAT=TENTATIVE"), "reply malformed");
+        }
+        Console.WriteLine("   reply builds correctly (not sent)");
+    });
+}
+
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "ALL STEPS PASSED" : $"{failures} STEP(S) FAILED");
 return failures == 0 ? 0 : 1;

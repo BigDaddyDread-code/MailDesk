@@ -60,6 +60,99 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised by the view to open the AI settings dialog.</summary>
     public Func<Task>? RequestAiSettings { get; set; }
 
+    /// <summary>Raised by the view to open the calendar window for an account.</summary>
+    public Func<Account, Task>? RequestCalendar { get; set; }
+
+    // ---------------- Calendar and invites ----------------
+
+    [ObservableProperty] private CalendarItem? _invite;
+    [ObservableProperty] private string _inviteStatusText = "";
+
+    [RelayCommand]
+    private async Task OpenCalendarAsync()
+    {
+        var account = CurrentAccount;
+        if (RequestCalendar is null || account is null) { StatusText = "Add an account first."; return; }
+        await RequestCalendar(account);
+    }
+
+    private async Task LoadInviteAsync(MessageSummary message, MessageBody body)
+    {
+        Invite = null;
+        InviteStatusText = "";
+        if (string.IsNullOrWhiteSpace(body.CalendarIcs) || SelectedFolder is null) return;
+        try
+        {
+            var parsed = Calendar.IcsCodec.Parse(body.CalendarIcs, SelectedFolder.Account.Id, message.Id).FirstOrDefault();
+            if (parsed is null) return;
+            // Prefer what we already know (our response) but show the newest details from this message.
+            var known = await _store.GetCalendarItemAsync(parsed.AccountId, parsed.Uid);
+            if (known is not null) { parsed.MyResponse = known.MyResponse; parsed.Id = known.Id; }
+            Invite = parsed;
+            InviteStatusText = parsed.Status == "CANCELLED" ? "This meeting was cancelled."
+                : parsed.MyResponse == RsvpStatus.NeedsAction ? "Not responded yet."
+                : $"You responded: {parsed.MyResponse}.";
+        }
+        catch (Exception ex)
+        {
+            InviteStatusText = $"Invite could not be read: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private Task AcceptInviteAsync() => RespondAsync(RsvpStatus.Accepted);
+
+    [RelayCommand]
+    private Task TentativeInviteAsync() => RespondAsync(RsvpStatus.Tentative);
+
+    [RelayCommand]
+    private Task DeclineInviteAsync() => RespondAsync(RsvpStatus.Declined);
+
+    [RelayCommand]
+    private async Task AddInviteToCalendarAsync()
+    {
+        if (Invite is null) return;
+        var saved = await _store.UpsertCalendarItemAsync(Invite);
+        Invite = saved;
+        InviteStatusText = "Added to your calendar.";
+        StatusText = $"Added to calendar: {saved.Summary}";
+    }
+
+    [RelayCommand]
+    private void JoinInvite() => CalendarViewModel.OpenLink(Invite?.JoinUrl);
+
+    /// <summary>Sends an iTIP reply to the organizer, then records the response locally. Sending is a real email, so it goes through IMailSender.</summary>
+    private async Task RespondAsync(RsvpStatus response)
+    {
+        if (Invite is null || SelectedFolder is null || RequestSender is null) return;
+        var account = SelectedFolder.Account;
+        var invite = Invite;
+        await RunBusyAsync($"Sending response to {invite.OrganizerName}...", async () =>
+        {
+            if (string.IsNullOrWhiteSpace(invite.OrganizerEmail))
+                throw new InvalidOperationException("The invite has no organizer address to reply to.");
+            var ics = Calendar.IcsCodec.BuildReply(invite, account.Email, account.Name, response);
+            var sender = RequestSender();
+            await sender.SendAsync(account, new OutgoingMessage
+            {
+                To = Core.Text.ComposeBuilder.Format(invite.OrganizerName, invite.OrganizerEmail),
+                Subject = Calendar.IcsCodec.ResponseSubject(invite, response),
+                TextBody = $"{account.Name} has {response.ToString().ToLowerInvariant()} this meeting: {invite.Summary}\n{invite.WhenText()}",
+                CalendarReplyIcs = ics,
+            });
+            invite.MyResponse = response;
+            var saved = await _store.UpsertCalendarItemAsync(invite);
+            await _store.SetCalendarResponseAsync(saved.Id, response);
+            saved.MyResponse = response;
+            Invite = saved;
+            InviteStatusText = $"You responded: {response}. Reply sent to {invite.OrganizerEmail}.";
+            StatusText = $"{response}: {invite.Summary}";
+        });
+    }
+
+    /// <summary>Supplied by the view so the view model can send invite replies without holding the sender itself.</summary>
+    public Func<IMailSender>? RequestSender { get; set; }
+
     [ObservableProperty] private string _agentSummary = "";
 
     [RelayCommand]
@@ -156,9 +249,11 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             ReaderHtml = MailHtml.Empty("Loading...");
+            Invite = null;
             var body = await _sync.FetchBodyAsync(SelectedFolder.Account, message);
             ReaderHtml = body.HtmlBody is { Length: > 0 } html ? MailHtml.FromHtml(html)
                 : MailHtml.FromText(body.TextBody ?? "(empty message)");
+            await LoadInviteAsync(message, body);
 
             if (!message.IsRead)
             {

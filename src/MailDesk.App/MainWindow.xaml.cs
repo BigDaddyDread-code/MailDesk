@@ -32,6 +32,8 @@ public partial class MainWindow : FluentWindow
         vm.RequestAccountDialog = ShowAccountDialogAsync;
         vm.RequestCompose = ShowComposeAsync;
         vm.RequestAiSettings = () => { new AiSettingsWindow(_store, _protector) { Owner = this }.ShowDialog(); return Task.CompletedTask; };
+        vm.RequestCalendar = account => { new CalendarWindow(new CalendarViewModel(_store, account.Id)) { Owner = this }.Show(); return Task.CompletedTask; };
+        vm.RequestSender = () => _sender;
         vm.RequestRuleEditor = ShowRuleEditorAsync;
         vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;
