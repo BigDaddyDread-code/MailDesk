@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MailDesk.Core\MailDesk.Core.csproj" />
+    <ProjectReference Include="..\..\src\MailDesk.Mail\MailDesk.Mail.csproj" />
+    <ProjectReference Include="..\..\src\MailDesk.Agent\MailDesk.Agent.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

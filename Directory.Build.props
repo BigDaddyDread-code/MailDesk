@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    Optional: set MAILDESK_ARTIFACTS to a short absolute path to put bin/obj there instead of under the repo.
+    Useful when the repo lives in a deeply nested folder and native package files hit the Windows 260-char path limit.
+  -->
+  <PropertyGroup Condition="'$(MAILDESK_ARTIFACTS)' != ''">
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MAILDESK_ARTIFACTS)</ArtifactsPath>
+  </PropertyGroup>
+</Project>

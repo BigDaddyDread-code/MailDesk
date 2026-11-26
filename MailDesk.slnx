@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MailDesk.Agent/MailDesk.Agent.csproj" />
+    <Project Path="src/MailDesk.App/MailDesk.App.csproj" />
+    <Project Path="src/MailDesk.Core/MailDesk.Core.csproj" />
+    <Project Path="src/MailDesk.Mail/MailDesk.Mail.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MailDesk.Tests/MailDesk.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/MailDesk.Smoke/MailDesk.Smoke.csproj" />
+  </Folder>
+</Solution>

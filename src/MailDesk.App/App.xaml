@@ -1,0 +1,126 @@
+﻿<Application x:Class="MailDesk.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:conv="clr-namespace:MailDesk.App.Converters">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Light" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+
+            <conv:DateConverter x:Key="DateConverter" />
+            <conv:ReadToFontWeightConverter x:Key="ReadToFontWeight" />
+            <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+            <conv:NullToVisibilityConverter x:Key="NullToVisibility" />
+            <conv:InitialConverter x:Key="Initial" />
+            <conv:AvatarBrushConverter x:Key="AvatarBrush" />
+
+            <!-- Slack-inspired palette -->
+            <SolidColorBrush x:Key="SidebarBrush" Color="#3F0E40" />
+            <SolidColorBrush x:Key="SidebarHoverBrush" Color="#350D36" />
+            <SolidColorBrush x:Key="SidebarSelectedBrush" Color="#1164A3" />
+            <SolidColorBrush x:Key="SidebarTextBrush" Color="#CFC3CF" />
+            <SolidColorBrush x:Key="TopBarBrush" Color="#350D36" />
+            <SolidColorBrush x:Key="SearchFieldBrush" Color="#5B2C5C" />
+            <SolidColorBrush x:Key="AccentBrush" Color="#007A5A" />
+            <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SurfaceAltBrush" Color="#F8F8F8" />
+            <SolidColorBrush x:Key="DividerBrush" Color="#DDDDDD" />
+            <SolidColorBrush x:Key="TextBrush" Color="#1D1C1D" />
+            <SolidColorBrush x:Key="MutedTextBrush" Color="#616061" />
+            <SolidColorBrush x:Key="RowSelectedBrush" Color="#E8F5FA" />
+            <SolidColorBrush x:Key="RowHoverBrush" Color="#F6F6F6" />
+
+            <!-- Sidebar folder rows -->
+            <Style x:Key="SidebarItemStyle" TargetType="ListBoxItem">
+                <Setter Property="Foreground" Value="{StaticResource SidebarTextBrush}" />
+                <Setter Property="Padding" Value="12,6" />
+                <Setter Property="Margin" Value="8,1" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ListBoxItem">
+                            <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource SidebarHoverBrush}" />
+                                    <Setter Property="Foreground" Value="White" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource SidebarSelectedBrush}" />
+                                    <Setter Property="Foreground" Value="White" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Message list rows -->
+            <Style x:Key="MessageRowStyle" TargetType="ListViewItem">
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Padding" Value="12,8" />
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ListViewItem">
+                            <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}" BorderThickness="0,0,0,1" BorderBrush="#EEEEEE">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="4" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border x:Name="Accent" Width="3" CornerRadius="2" Background="Transparent" Margin="-8,0,0,0" HorizontalAlignment="Left" />
+                                    <ContentPresenter Grid.Column="1" />
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowSelectedBrush}" />
+                                    <Setter TargetName="Accent" Property="Background" Value="{StaticResource SidebarSelectedBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Top-bar buttons: flat, light text on aubergine -->
+            <Style x:Key="TopBarButtonStyle" TargetType="Button">
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="12,6" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#5B2C5C" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="TopBarPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource TopBarButtonStyle}">
+                <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
