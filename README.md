@@ -60,3 +60,7 @@ absolute path before building; `Directory.Build.props` then redirects `bin`/`obj
 3. Claude-backed `IAgentService` using the Anthropic C# SDK tool runner, with the same proposal contract.
 4. Connection pooling and IMAP IDLE for push updates; flag resync for already-cached messages.
 5. Threading, OAuth2 for Gmail/Outlook, keyboard shortcuts, notifications.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
