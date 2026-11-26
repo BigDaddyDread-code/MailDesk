@@ -189,6 +189,58 @@ public sealed class TriageToolboxTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Mailbox_toolbox_sees_calendar_and_tasks_and_records_offers()
+    {
+        var box = new MailboxToolbox(_store, null, _account);
+        var start = new DateTimeOffset(DateTime.Today.AddDays(2).AddHours(10), TimeZoneInfo.Local.GetUtcOffset(DateTime.Today.AddDays(2)));
+        await _store.UpsertCalendarItemAsync(new CalendarItem { AccountId = _account.Id, Uid = "ev-1", Summary = "Dentist", StartUtcMs = start.ToUnixTimeMilliseconds(), EndUtcMs = start.AddMinutes(30).ToUnixTimeMilliseconds() });
+        await _store.UpsertTaskAsync(new TaskItem { AccountId = _account.Id, Title = "Pay rates" });
+
+        var events = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("list_events", J(new { })));
+        Assert.Equal("Dentist", events.GetProperty("events")[0].GetProperty("title").GetString());
+        var none = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("list_events", J(new { from_date = "2020-01-01", to_date = "2020-01-02" })));
+        Assert.Equal(0, none.GetProperty("events").GetArrayLength());
+
+        var tasks = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("list_tasks", J(new { })));
+        Assert.Equal("Pay rates", tasks[0].GetProperty("title").GetString());
+
+        var lunch = (await _store.GetMessagesAsync(_inbox.Id)).Single(m => m.Uid == 3);
+        await box.ExecuteAsync("get_message", J(new { id = lunch.Id }));
+        var offered = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("suggest_event", J(new { title = "Lunch with Pat", start = "2026-12-04T12:00", end = "2026-12-04T13:00", message_id = lunch.Id })));
+        Assert.True(offered.GetProperty("offered").GetBoolean());
+        var bad = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("suggest_event", J(new { title = "No start", start = "whenever" })));
+        Assert.True(bad.TryGetProperty("error", out _));
+        await box.ExecuteAsync("suggest_task", J(new { title = "Book the table", due_date = "2026-12-03", message_id = lunch.Id }));
+
+        var (ev, messageId) = Assert.Single(box.SuggestedEvents);
+        Assert.Equal(lunch.Id, messageId);
+        Assert.Equal("Fri 4 Dec 2026, 12:00 to 13:00", ev.WhenText);
+        var item = ev.ToCalendarItem(_account.Id, "uid-x", "t@x", "T", messageId);
+        Assert.Equal(60 * 60 * 1000, item.EndUtcMs - item.StartUtcMs);
+        Assert.False(item.AllDay);
+        Assert.Equal(RsvpStatus.Accepted, item.MyResponse);
+
+        var task = Assert.Single(box.SuggestedTasks);
+        Assert.Equal("Lunch", task.SourceSubject);
+        Assert.NotNull(task.DueUtcMs);
+
+        // Nothing was saved by offering.
+        Assert.Single(await _store.GetTasksAsync(_account.Id, true));
+    }
+
+    [Fact]
+    public void Event_suggestion_handles_all_day_dates()
+    {
+        var e = new EventSuggestion { Title = "Rates due", Start = "2026-12-20" };
+        Assert.True(e.IsValid);
+        Assert.Contains("(all day)", e.WhenText);
+        var item = e.ToCalendarItem(1, "u", "me@x", "Me", null);
+        Assert.True(item.AllDay);
+        Assert.Equal(24 * 60 * 60 * 1000, item.EndUtcMs - item.StartUtcMs);
+        Assert.False(new EventSuggestion { Title = "x", Start = "" }.IsValid);
+    }
+
+    [Fact]
     public void Insight_parser_tolerates_fences_and_chatter()
     {
         var insight = InsightsService.Parse("Sure! ```json\n{\"summary\":\"Rates are due.\",\"action_items\":[\"Pay $412.50 by 20 Dec\",\" \"],\"suggested_replies\":[\"Thanks, paid.\",\"a\",\"b\",\"c\"],\"tone\":\"formal\"}\n```");

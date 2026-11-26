@@ -396,7 +396,12 @@ public sealed partial class MainViewModel : ObservableObject
         {
             var client = await ModelClients.CreateAsync(_store, RequestProtector());
             var answer = await new MailboxAssistant(_store, _sync).AskAsync(client, account, history, question);
-            Chat.Add(new ChatEntry { FromUser = false, Text = answer.Text, Sources = answer.Sources.ToList(), Note = answer.ModelNote });
+            Chat.Add(new ChatEntry
+            {
+                FromUser = false, Text = answer.Text, Sources = answer.Sources.ToList(), Note = answer.ModelNote,
+                Events = answer.SuggestedEvents.Select(e => new OfferedEvent(e.Event, e.MessageId)).ToList(),
+                Tasks = answer.SuggestedTasks.Select(t => new OfferedTask(t)).ToList(),
+            });
         }
         catch (Exception ex)
         {
@@ -407,6 +412,46 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void ClearChat() => Chat.Clear();
+
+    /// <summary>Saves a suggested event as a private calendar entry organised by the user. Nothing is sent.</summary>
+    private async Task<CalendarItem?> SaveSuggestedEventAsync(EventSuggestion suggestion, long? sourceMessageId)
+    {
+        var account = CurrentAccount;
+        if (account is null || !suggestion.IsValid) return null;
+        var item = suggestion.ToCalendarItem(account.Id, Calendar.IcsCodec.NewUid(account.Email), account.Email, account.Name, sourceMessageId);
+        item.RawIcs = Calendar.IcsCodec.BuildRequest(item);
+        var saved = await _store.UpsertCalendarItemAsync(item);
+        StatusText = $"Added to calendar: {saved.Summary}, {saved.WhenText()}";
+        return saved;
+    }
+
+    /// <summary>Summary card: a date the model found in the open message.</summary>
+    [RelayCommand]
+    private async Task AddInsightEventAsync(EventSuggestion? suggestion)
+    {
+        if (suggestion is null) return;
+        var saved = await SaveSuggestedEventAsync(suggestion, SelectedMessage?.Id);
+        if (saved is not null && Insight is { } insight) { insight.Events.Remove(suggestion); OnPropertyChanged(nameof(Insight)); Insight = insight; }
+    }
+
+    /// <summary>Chat: an event the assistant offered.</summary>
+    [RelayCommand]
+    private async Task AddOfferedEventAsync(OfferedEvent? offered)
+    {
+        if (offered is null || offered.Added) return;
+        if (await SaveSuggestedEventAsync(offered.Suggestion, offered.MessageId) is not null) offered.Added = true;
+    }
+
+    /// <summary>Chat: a task the assistant offered.</summary>
+    [RelayCommand]
+    private async Task AddOfferedTaskAsync(OfferedTask? offered)
+    {
+        if (offered is null || offered.Added || CurrentAccount is null) return;
+        offered.Task.AccountId = CurrentAccount.Id;
+        await _store.UpsertTaskAsync(offered.Task);
+        offered.Added = true;
+        StatusText = $"Task added: {offered.Title}";
+    }
 
     [RelayCommand]
     private Task OpenSourceMessageAsync(MessageSummary? message) => message is null ? Task.CompletedTask : OpenMessageAsync(message.Id);

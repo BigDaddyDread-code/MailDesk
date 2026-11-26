@@ -11,11 +11,14 @@ public sealed class MessageInsight
     [JsonPropertyName("action_items")] public List<string> ActionItems { get; set; } = [];
     [JsonPropertyName("suggested_replies")] public List<string> SuggestedReplies { get; set; } = [];
     [JsonPropertyName("tone")] public string Tone { get; set; } = "";
+    /// <summary>Appointments, deadlines and meetings the mail proposes or confirms.</summary>
+    [JsonPropertyName("events")] public List<EventSuggestion> Events { get; set; } = [];
     [JsonIgnore] public long MessageId { get; set; }
     [JsonIgnore] public string ModelNote { get; set; } = "";
 
     public bool HasActions => ActionItems.Count > 0;
     public bool HasReplies => SuggestedReplies.Count > 0;
+    public bool HasEvents => Events.Count > 0;
 }
 
 /// <summary>One call, one message, strict JSON back. The body goes to the model, so this only runs when the user clicks Summarise.</summary>
@@ -30,9 +33,12 @@ public static class InsightsService
         {"summary": "two or three plain sentences saying what the email is and what matters",
          "action_items": ["imperative, one line each, only things {{readerName}} actually needs to do; empty list if nothing"],
          "suggested_replies": ["up to three complete short replies {{readerName}} could send as-is, each under 60 words; empty list for mail that needs no reply such as newsletters or receipts"],
+         "events": [{"title": "short name", "start": "YYYY-MM-DDTHH:MM local time, or YYYY-MM-DD for a whole day", "end": "same format, optional", "location": "", "notes": "", "all_day": false}],
          "tone": "one or two words, e.g. friendly, formal, urgent, marketing"}
+        "events" lists appointments, meetings, deliveries, deadlines and due dates the email proposes or confirms, with the
+        date resolved from the email's own date (today is {{DateTime.Now:yyyy-MM-dd}}, a {{DateTime.Now:dddd}}); empty list if none.
         Quote amounts, dates and reference numbers exactly as written. If the email is a scam or phishing attempt, say so in
-        the summary and give no replies. Write in the language of the email.
+        the summary and give no replies or events. Write in the language of the email.
         """;
 
     public static async Task<MessageInsight> AnalyzeAsync(IModelClient client, string readerName, MessageSummary message, string bodyText, CancellationToken ct = default)
@@ -57,6 +63,7 @@ public static class InsightsService
             var insight = JsonSerializer.Deserialize<MessageInsight>(text[start..(end + 1)], Json) ?? new MessageInsight();
             insight.ActionItems = insight.ActionItems.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
             insight.SuggestedReplies = insight.SuggestedReplies.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Take(3).ToList();
+            insight.Events = insight.Events.Where(e => e.IsValid).Take(5).ToList();
             return insight;
         }
         catch (JsonException)

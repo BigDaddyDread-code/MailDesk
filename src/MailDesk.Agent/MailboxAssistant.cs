@@ -49,7 +49,38 @@ public sealed class MailboxToolbox
             new { type = "object", properties = new { id = new { type = "integer" } }, required = new[] { "id" }, additionalProperties = false }),
         new("list_folders", "Folders with counts.",
             new { type = "object", properties = new { }, additionalProperties = false }),
+        new("list_events", "Calendar entries between two dates (default today to 14 days ahead): title, start, end, location, organiser, the user's response.",
+            new { type = "object", properties = new
+            {
+                from_date = new { type = "string", description = "YYYY-MM-DD, inclusive" },
+                to_date = new { type = "string", description = "YYYY-MM-DD, inclusive" },
+            }, additionalProperties = false }),
+        new("list_tasks", "The user's to-do list: open tasks with due dates, or everything with include_done.",
+            new { type = "object", properties = new { include_done = new { type = "boolean" } }, additionalProperties = false }),
+        new("suggest_event", "Offer a calendar entry the user can add with one click (an appointment, deadline or meeting found in mail or asked for). It is not added until they click. Use local times.",
+            new { type = "object", properties = new
+            {
+                title = new { type = "string" },
+                start = new { type = "string", description = "YYYY-MM-DDTHH:MM local, or YYYY-MM-DD for all day" },
+                end = new { type = "string", description = "Same format; optional" },
+                location = new { type = "string" },
+                notes = new { type = "string" },
+                all_day = new { type = "boolean" },
+                message_id = new { type = "integer", description = "The message it came from, if any" },
+            }, required = new[] { "title", "start" }, additionalProperties = false }),
+        new("suggest_task", "Offer a to-do the user can add with one click. Not added until they click.",
+            new { type = "object", properties = new
+            {
+                title = new { type = "string" },
+                notes = new { type = "string" },
+                due_date = new { type = "string", description = "YYYY-MM-DD, optional" },
+                message_id = new { type = "integer", description = "The message it came from, if any" },
+            }, required = new[] { "title" }, additionalProperties = false }),
     ];
+
+    /// <summary>Events and tasks the model offered. The UI turns each into an Add button.</summary>
+    public List<(EventSuggestion Event, long? MessageId)> SuggestedEvents { get; } = [];
+    public List<TaskItem> SuggestedTasks { get; } = [];
 
     public async Task<string> ExecuteAsync(string name, JsonElement input, CancellationToken ct = default)
     {
@@ -61,6 +92,10 @@ public sealed class MailboxToolbox
                 "list_messages" => await ListAsync(Str(input, "folder"), Bool(input, "unread_only"), Int(input, "limit", 30, 100), ct),
                 "get_message" => await GetAsync(input, ct),
                 "list_folders" => await FoldersAsync(ct),
+                "list_events" => await EventsAsync(Str(input, "from_date"), Str(input, "to_date"), ct),
+                "list_tasks" => await TasksAsync(Bool(input, "include_done"), ct),
+                "suggest_event" => SuggestEvent(input),
+                "suggest_task" => SuggestTask(input),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown tool '{name}'." }),
             };
         }
@@ -126,6 +161,61 @@ public sealed class MailboxToolbox
         return JsonSerializer.Serialize(folders.Select(f => new { name = f.DisplayName, kind = f.Kind.ToString(), total = f.TotalCount, unread = f.UnreadCount }), Json);
     }
 
+    private async Task<string> EventsAsync(string? fromText, string? toText, CancellationToken ct)
+    {
+        var from = EventSuggestion.ParseLocal(fromText) ?? new DateTimeOffset(DateTime.Today, TimeZoneInfo.Local.GetUtcOffset(DateTime.Today));
+        var to = (EventSuggestion.ParseLocal(toText) ?? from.AddDays(14)).Date.AddDays(1);
+        var toOffset = new DateTimeOffset(to, TimeZoneInfo.Local.GetUtcOffset(to));
+        var items = await _store.GetCalendarItemsAsync(_account.Id, from.ToUnixTimeMilliseconds(), toOffset.ToUnixTimeMilliseconds(), ct);
+        return JsonSerializer.Serialize(new
+        {
+            from = from.ToString("yyyy-MM-dd"), to = toOffset.AddDays(-1).ToString("yyyy-MM-dd"),
+            events = items.OrderBy(i => i.StartUtcMs).Select(i => new
+            {
+                title = i.Summary, start = i.Start.ToString("yyyy-MM-dd HH:mm"), end = i.End.ToString("yyyy-MM-dd HH:mm"), all_day = i.AllDay,
+                location = i.Location, organiser = string.IsNullOrWhiteSpace(i.OrganizerName) ? i.OrganizerEmail : i.OrganizerName,
+                my_response = i.MyResponse.ToString(), recurring = i.IsRecurring, status = i.Status,
+            }),
+        }, Json);
+    }
+
+    private async Task<string> TasksAsync(bool includeDone, CancellationToken ct)
+    {
+        var tasks = await _store.GetTasksAsync(_account.Id, includeDone, ct);
+        return JsonSerializer.Serialize(tasks.Select(t => new
+        {
+            title = t.Title, notes = t.Notes, due = t.Due?.ToString("yyyy-MM-dd"), overdue = t.IsOverdue, done = t.IsDone, from_message = t.SourceSubject,
+        }), Json);
+    }
+
+    private string SuggestEvent(JsonElement input)
+    {
+        var e = new EventSuggestion
+        {
+            Title = Str(input, "title") ?? "", Start = Str(input, "start") ?? "", End = Str(input, "end") ?? "",
+            Location = Str(input, "location") ?? "", Notes = Str(input, "notes") ?? "", AllDay = Bool(input, "all_day"),
+        };
+        if (!e.IsValid) return JsonSerializer.Serialize(new { error = "title and a parseable start (YYYY-MM-DDTHH:MM or YYYY-MM-DD) are required." });
+        long? messageId = input.ValueKind == JsonValueKind.Object && input.TryGetProperty("message_id", out var m) && m.TryGetInt64(out var id) ? id : null;
+        SuggestedEvents.Add((e, messageId));
+        return JsonSerializer.Serialize(new { offered = true, when = e.WhenText, note = "Shown to the user as an Add to calendar button." });
+    }
+
+    private string SuggestTask(JsonElement input)
+    {
+        var title = (Str(input, "title") ?? "").Trim();
+        if (title.Length < 3) return JsonSerializer.Serialize(new { error = "title is required." });
+        long? messageId = input.ValueKind == JsonValueKind.Object && input.TryGetProperty("message_id", out var m) && m.TryGetInt64(out var id) ? id : null;
+        var due = EventSuggestion.ParseLocal(Str(input, "due_date"));
+        var source = messageId is null ? null : Consulted.FirstOrDefault(c => c.Id == messageId);
+        SuggestedTasks.Add(new TaskItem
+        {
+            AccountId = _account.Id, Title = title, Notes = Str(input, "notes") ?? "", DueUtcMs = due?.ToUnixTimeMilliseconds(),
+            SourceMessageId = source?.Id, SourceSubject = source?.Subject ?? "",
+        });
+        return JsonSerializer.Serialize(new { offered = true, note = "Shown to the user as an Add task button." });
+    }
+
     private void Remember(IEnumerable<MessageSummary> messages)
     {
         foreach (var m in messages)
@@ -152,6 +242,8 @@ public sealed class AssistantAnswer
     public string Text { get; init; } = "";
     /// <summary>Messages the model opened or searched up while answering, for the user to click.</summary>
     public IReadOnlyList<MessageSummary> Sources { get; init; } = [];
+    public IReadOnlyList<(EventSuggestion Event, long? MessageId)> SuggestedEvents { get; init; } = [];
+    public IReadOnlyList<TaskItem> SuggestedTasks { get; init; } = [];
     public string ModelNote { get; init; } = "";
 }
 
@@ -169,11 +261,14 @@ public sealed class MailboxAssistant
 
     public static string System(string userName, string userEmail) => $"""
         You are the mailbox assistant inside {userName}'s email client ({userEmail}). Today is {DateTime.Now:dddd d MMMM yyyy}.
-        Answer questions about their mail by using the tools: search first, read a message with get_message only when the
-        preview is not enough, and keep tool calls few. Answer in plain text, briefly and specifically, quoting dates,
-        amounts and names from the mail. Mention which message something came from by sender and subject so the person
-        can find it. If the mail does not contain the answer, say so rather than guessing. You cannot send, move or change
-        anything; if asked to, explain that and suggest what the person can do in the client.
+        Answer questions about their mail, calendar and to-do list by using the tools: search first, read a message with
+        get_message only when the preview is not enough, list_events for what is coming up, list_tasks for what is owed,
+        and keep tool calls few. Answer in plain text, briefly and specifically, quoting dates, amounts and names from the
+        mail. Mention which message something came from by sender and subject so the person can find it. If the mail does
+        not contain the answer, say so rather than guessing. You cannot send, move or change anything yourself. When the
+        person asks to put something in the calendar or on the to-do list, or mail clearly contains an appointment or a
+        deadline they would want, call suggest_event or suggest_task: that shows them a button, and they decide. Say in
+        your answer that you have offered it.
         """;
 
     public async Task<AssistantAnswer> AskAsync(IModelClient client, Account account, IReadOnlyList<ChatTurn> history, string question, CancellationToken ct = default)
@@ -184,6 +279,8 @@ public sealed class MailboxAssistant
         {
             Text = string.IsNullOrWhiteSpace(result.Text) ? "I could not find an answer in your mail." : result.Text,
             Sources = toolbox.Consulted.Take(8).ToList(),
+            SuggestedEvents = toolbox.SuggestedEvents,
+            SuggestedTasks = toolbox.SuggestedTasks,
             ModelNote = $"{client.Name}, {result.InputTokens:N0} in / {result.OutputTokens:N0} out",
         };
     }

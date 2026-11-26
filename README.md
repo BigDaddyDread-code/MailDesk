@@ -114,13 +114,17 @@ folder under the pointer highlights green when it can take the drop; Drafts and 
 ## Summarise and ask
 
 The sparkle button in the reader header sends the open message to the model named in AI settings and shows a card above
-the body: a short summary, the things the mail asks you to do (each with **Add task**), and up to three quick replies that
-open the compose window with that text above the quote. Scams are called out and get no replies.
+the body: a short summary, the things the mail asks you to do (each with **Add task**), any dates it proposes or confirms
+(each with **Add to calendar**), and up to three quick replies that open the compose window with that text above the
+quote. Scams are called out and get no replies.
 
 **Ask your mailbox** sits at the top of the agent pane (the robot icon). Type a question such as "what did the council say
-about rates?" and the model answers by searching and reading your mail through read-only tools (`search_messages`,
-`list_messages`, `get_message`, `list_folders`). Each answer lists the messages it looked at; click one to open it. The
-conversation is kept for follow-up questions until you clear it, and nothing in it can move, send or delete mail.
+about rates?" or "what's on next week?" and the model answers by searching and reading your mail, calendar and to-do list
+through read-only tools (`search_messages`, `list_messages`, `get_message`, `list_folders`, `list_events`, `list_tasks`).
+Each answer lists the messages it looked at; click one to open it. When you ask to put something in the calendar or on
+the list, or mail clearly holds an appointment or deadline, the model calls `suggest_event` or `suggest_task`, which only
+shows you an **Add** button: nothing is saved until you click it. The conversation is kept for follow-up questions until
+you clear it, and nothing in it can move, send or delete mail.
 
 Both send message text to the provider, and both only run when you click.
 
