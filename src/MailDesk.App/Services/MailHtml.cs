@@ -14,15 +14,24 @@ public static class MailHtml
     private static readonly Regex ScriptTag = new(@"<script\b[^>]*>.*?</script>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly Regex HeadOpen = new(@"<head\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex RemoteImage = new(@"(<img\b[^>]*\bsrc\s*=\s*[""']?\s*https?://|url\(\s*[""']?https?://)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Default policy: only inline (data:) and attached (cid:) images load. Nothing is fetched from the sender.</summary>
     private const string Csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: cid:; style-src 'unsafe-inline'; font-src data:;\">";
+    /// <summary>Policy once the user chooses to show images: remote images and CSS backgrounds may load. Scripts, frames and fonts stay blocked.</summary>
+    private const string CspWithImages = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: cid: https: http:; style-src 'unsafe-inline'; font-src data:;\">";
     private const string BaseStyle = "<style>html,body{background:#ffffff;} body{font-family:Segoe UI,sans-serif;font-size:14px;color:#1d1c1d;margin:16px;} a{color:#1264a3;} pre{white-space:pre-wrap;font-family:Segoe UI,sans-serif;} img{max-width:100%;height:auto;}</style>";
 
-    public static string FromHtml(string html)
+    /// <summary>True when the HTML references images on a remote server, i.e. the ones the default policy blocks.</summary>
+    public static bool HasRemoteImages(string? html) => html is not null && RemoteImage.IsMatch(html);
+
+    public static string FromHtml(string html, bool allowRemoteImages = false)
     {
+        var csp = allowRemoteImages ? CspWithImages : Csp;
         var cleaned = ScriptTag.Replace(html, "");
         if (HeadOpen.IsMatch(cleaned))
-            return HeadOpen.Replace(cleaned, m => m.Value + Csp + BaseStyle, 1);
-        return $"<!doctype html><html><head><meta charset=\"utf-8\">{Csp}{BaseStyle}</head><body>{cleaned}</body></html>";
+            return HeadOpen.Replace(cleaned, m => m.Value + csp + BaseStyle, 1);
+        return $"<!doctype html><html><head><meta charset=\"utf-8\">{csp}{BaseStyle}</head><body>{cleaned}</body></html>";
     }
 
     public static string FromText(string text)

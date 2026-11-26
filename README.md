@@ -117,6 +117,8 @@ text plus a minimal HTML alternative so other clients keep the line breaks.
 - Agent moves target Trash or Junk, never permanent delete. Sending mail is never an agent tool.
 - `DeleteFolderAsync` refuses special folders (Inbox, Sent, Drafts, Trash, Junk, Archive).
 - HTML mail renders in WebView2 with scripts off and a CSP that blocks remote images, on a white background.
+  A bar above such a message offers **Show images** (this message only) or **Always show from this sender**
+  (the address is kept in the local settings table). Links always open in the system browser, never in the reader.
 
 ## Building in a deeply nested folder
 

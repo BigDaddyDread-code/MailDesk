@@ -250,9 +250,12 @@ public sealed partial class MainViewModel : ObservableObject
         {
             ReaderHtml = MailHtml.Empty("Loading...");
             Invite = null;
+            HasBlockedImages = false;
             var body = await _sync.FetchBodyAsync(SelectedFolder.Account, message);
-            ReaderHtml = body.HtmlBody is { Length: > 0 } html ? MailHtml.FromHtml(html)
-                : MailHtml.FromText(body.TextBody ?? "(empty message)");
+            if (!ReferenceEquals(message, SelectedMessage)) return; // user moved on while the body was downloading
+            _currentBody = body;
+            var allowImages = await IsSenderAllowedImagesAsync(message.FromAddress);
+            RenderBody(allowImages);
             await LoadInviteAsync(message, body);
 
             if (!message.IsRead)
@@ -266,6 +269,56 @@ public sealed partial class MainViewModel : ObservableObject
         {
             ReaderHtml = MailHtml.Empty($"Could not load message: {ex.Message}");
         }
+    }
+
+    // ---------------- Remote images ----------------
+
+    private const string AllowedImageSendersKey = "images.allowed_senders";
+    private MessageBody? _currentBody;
+
+    /// <summary>True while the open message has remote images that the reader is blocking.</summary>
+    [ObservableProperty] private bool _hasBlockedImages;
+
+    private void RenderBody(bool allowRemoteImages)
+    {
+        var body = _currentBody;
+        if (body is null) return;
+        if (body.HtmlBody is { Length: > 0 } html)
+        {
+            ReaderHtml = MailHtml.FromHtml(html, allowRemoteImages);
+            HasBlockedImages = !allowRemoteImages && MailHtml.HasRemoteImages(html);
+        }
+        else
+        {
+            ReaderHtml = MailHtml.FromText(body.TextBody ?? "(empty message)");
+            HasBlockedImages = false;
+        }
+    }
+
+    private async Task<HashSet<string>> AllowedImageSendersAsync()
+    {
+        var raw = await _store.GetSettingAsync(AllowedImageSendersKey) ?? "";
+        return raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<bool> IsSenderAllowedImagesAsync(string fromAddress) =>
+        !string.IsNullOrWhiteSpace(fromAddress) && (await AllowedImageSendersAsync()).Contains(fromAddress);
+
+    /// <summary>Shows the remote images in the open message only. The next message from the sender is blocked again.</summary>
+    [RelayCommand]
+    private void ShowImages() => RenderBody(allowRemoteImages: true);
+
+    /// <summary>Shows the images now and remembers the sender address, so their mail always loads images.</summary>
+    [RelayCommand]
+    private async Task AlwaysShowImagesFromSenderAsync()
+    {
+        var from = SelectedMessage?.FromAddress;
+        if (string.IsNullOrWhiteSpace(from)) return;
+        var allowed = await AllowedImageSendersAsync();
+        allowed.Add(from);
+        await _store.SetSettingAsync(AllowedImageSendersKey, string.Join('\n', allowed.OrderBy(a => a)));
+        RenderBody(allowRemoteImages: true);
+        StatusText = $"Images from {from} will always show.";
     }
 
     // ---------------- Accounts and sync ----------------
