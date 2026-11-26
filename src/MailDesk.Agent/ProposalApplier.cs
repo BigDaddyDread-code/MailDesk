@@ -54,7 +54,17 @@ public sealed class ProposalApplier
                     }
                     break;
                 case ProposalKind.CreateRule:
-                    throw new NotImplementedException("Rules engine is not built yet.");
+                {
+                    // Skip rules that already exist with identical conditions and action, so re-approving is harmless.
+                    var existing = await _store.GetRulesAsync(account.Id, ct);
+                    foreach (var rule in proposal.Rules)
+                    {
+                        rule.AccountId = account.Id;
+                        var dup = existing.Any(e => e.Action == rule.Action && e.TargetFolder == rule.TargetFolder && e.Conditions.SequenceEqual(rule.Conditions));
+                        if (!dup) await _store.UpsertRuleAsync(rule, ct);
+                    }
+                    break;
+                }
             }
             proposal.Status = ProposalStatus.Applied;
         }

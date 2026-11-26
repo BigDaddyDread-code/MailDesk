@@ -40,6 +40,20 @@ It syncs folders and the Inbox, fetches a body, searches, toggles and restores a
 creates a folder named `MailDesk Smoke`, moves the newest Inbox message into it and back, deletes that folder,
 and runs the triage agent in propose-only mode. The mailbox ends in the state it started in.
 
+## Rules
+
+A rule is one or more conditions on sender address, sender name, sender domain, subject or recipients
+(contains, is, starts with, ends with, regex; all case-insensitive, all must match) plus one action:
+move to a folder (created on first use), move to Trash, mark read, or flag. The first matching rule wins.
+
+- Rules run automatically on new Inbox mail after every sync.
+- **Rules** in the top bar lists them; **Run now on current folder** applies them to what is already there.
+- Right-click a message and choose **Create rule from sender...** to start a rule pre-filled with that sender.
+- **Tidy with agent** also proposes rules for senders that appear three or more times in a junk bucket, so
+  approving one grouping keeps that sender out of the Inbox for good.
+
+A rule with no conditions never matches, so a half-finished rule cannot move mail.
+
 ## Design rules
 
 - The UI reads only from the local store. The sync layer is the only thing that talks to the server.

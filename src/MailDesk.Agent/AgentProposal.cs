@@ -1,3 +1,5 @@
+using MailDesk.Core.Models;
+
 namespace MailDesk.Agent;
 
 public enum ProposalKind
@@ -33,9 +35,11 @@ public sealed class AgentProposal
     public IReadOnlyList<long> MessageIds { get; init; } = [];
     /// <summary>Target folder display name for MoveMessages / CreateFolder. Created if it does not exist.</summary>
     public string? TargetFolderName { get; init; }
+    /// <summary>Rules to save for CreateRule proposals.</summary>
+    public IReadOnlyList<MailRule> Rules { get; init; } = [];
     public ProposalStatus Status { get; set; } = ProposalStatus.Pending;
     public string? Error { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.Now;
 
-    public int Count => MessageIds.Count;
+    public int Count => Kind == ProposalKind.CreateRule ? Rules.Count : MessageIds.Count;
 }

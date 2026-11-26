@@ -36,7 +36,24 @@ public sealed class SqliteMailStore : IMailStore
         using var conn = Open();
         await conn.ExecuteAsync("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
         await conn.ExecuteAsync(Schema);
+        await conn.ExecuteAsync(RulesSchema);
     }
+
+    private const string RulesSchema = """
+        CREATE TABLE IF NOT EXISTS rules (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            AccountId INTEGER NOT NULL REFERENCES accounts(Id) ON DELETE CASCADE,
+            Name TEXT NOT NULL,
+            Enabled INTEGER NOT NULL DEFAULT 1,
+            SortOrder INTEGER NOT NULL DEFAULT 0,
+            ConditionsJson TEXT NOT NULL DEFAULT '[]',
+            Action TEXT NOT NULL,
+            TargetFolder TEXT,
+            CreatedUtcMs INTEGER NOT NULL,
+            HitCount INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS ix_rules_account ON rules(AccountId, SortOrder);
+        """;
 
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS accounts (
@@ -375,6 +392,101 @@ public sealed class SqliteMailStore : IMailStore
         {
             using var conn = Open();
             await conn.ExecuteAsync("PRAGMA foreign_keys=ON; DELETE FROM messages WHERE FolderId=@folderId; DELETE FROM folders WHERE Id=@folderId", new { folderId });
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    // ---------------- Rules ----------------
+
+    private static readonly System.Text.Json.JsonSerializerOptions RuleJson = new()
+    {
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+    };
+
+    private sealed class RuleRow
+    {
+        public long Id { get; set; }
+        public long AccountId { get; set; }
+        public string Name { get; set; } = "";
+        public bool Enabled { get; set; }
+        public int SortOrder { get; set; }
+        public string ConditionsJson { get; set; } = "[]";
+        public string Action { get; set; } = "";
+        public string? TargetFolder { get; set; }
+        public long CreatedUtcMs { get; set; }
+        public int HitCount { get; set; }
+
+        public MailRule ToRule() => new()
+        {
+            Id = Id, AccountId = AccountId, Name = Name, Enabled = Enabled, SortOrder = SortOrder,
+            Conditions = System.Text.Json.JsonSerializer.Deserialize<List<RuleCondition>>(ConditionsJson, RuleJson) ?? [],
+            Action = Enum.TryParse<RuleAction>(Action, out var a) ? a : RuleAction.MoveToFolder,
+            TargetFolder = TargetFolder, CreatedUtcMs = CreatedUtcMs, HitCount = HitCount,
+        };
+    }
+
+    public async Task<IReadOnlyList<MailRule>> GetRulesAsync(long accountId, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var rows = await conn.QueryAsync<RuleRow>("SELECT * FROM rules WHERE AccountId=@accountId ORDER BY SortOrder, Id", new { accountId });
+        return rows.Select(r => r.ToRule()).ToList();
+    }
+
+    public async Task<long> UpsertRuleAsync(MailRule rule, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            var p = new
+            {
+                rule.Id, rule.AccountId, rule.Name, rule.Enabled, rule.SortOrder,
+                ConditionsJson = System.Text.Json.JsonSerializer.Serialize(rule.Conditions, RuleJson),
+                Action = rule.Action.ToString(), rule.TargetFolder,
+                CreatedUtcMs = rule.CreatedUtcMs == 0 ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : rule.CreatedUtcMs,
+                rule.HitCount,
+            };
+            if (rule.Id == 0)
+            {
+                if (rule.SortOrder == 0)
+                    rule.SortOrder = (await conn.ExecuteScalarAsync<int?>("SELECT MAX(SortOrder) FROM rules WHERE AccountId=@AccountId", p) ?? 0) + 1;
+                rule.Id = await conn.ExecuteScalarAsync<long>("""
+                    INSERT INTO rules (AccountId, Name, Enabled, SortOrder, ConditionsJson, Action, TargetFolder, CreatedUtcMs, HitCount)
+                    VALUES (@AccountId, @Name, @Enabled, @SortOrder, @ConditionsJson, @Action, @TargetFolder, @CreatedUtcMs, @HitCount);
+                    SELECT last_insert_rowid();
+                    """, new { p.AccountId, p.Name, p.Enabled, rule.SortOrder, p.ConditionsJson, p.Action, p.TargetFolder, p.CreatedUtcMs, p.HitCount });
+                rule.CreatedUtcMs = p.CreatedUtcMs;
+            }
+            else
+            {
+                await conn.ExecuteAsync("""
+                    UPDATE rules SET Name=@Name, Enabled=@Enabled, SortOrder=@SortOrder, ConditionsJson=@ConditionsJson,
+                        Action=@Action, TargetFolder=@TargetFolder WHERE Id=@Id
+                    """, p);
+            }
+            return rule.Id;
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    public async Task DeleteRuleAsync(long ruleId, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            await conn.ExecuteAsync("DELETE FROM rules WHERE Id=@ruleId", new { ruleId });
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    public async Task IncrementRuleHitsAsync(long ruleId, int count, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            await conn.ExecuteAsync("UPDATE rules SET HitCount = HitCount + @count WHERE Id=@ruleId", new { ruleId, count });
         }
         finally { _writeLock.Release(); }
     }

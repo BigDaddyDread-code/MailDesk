@@ -106,7 +106,7 @@ public sealed class ImapMailSync : IMailSync
         return FolderKind.Other;
     }
 
-    public async Task SyncFolderAsync(Account account, MailFolder folder, int initialBatch = 500, IProgress<string>? progress = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MessageSummary>> SyncFolderAsync(Account account, MailFolder folder, int initialBatch = 500, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         using var client = await ConnectAsync(account, null, ct);
         var remote = await client.GetFolderAsync(folder.FullName, ct);
@@ -153,6 +153,11 @@ public sealed class ImapMailSync : IMailSync
 
         progress?.Report(rows.Count > 0 ? $"{rows.Count} new in {folder.DisplayName}." : $"{folder.DisplayName} is up to date.");
         await client.DisconnectAsync(true, ct);
+
+        // Re-read so callers get rows with their database ids (needed to move or flag them later).
+        if (rows.Count == 0) return [];
+        var minUid = rows.Min(r => r.Uid);
+        return (await _store.GetMessagesAsync(folder.Id, limit: rows.Count + 50, ct: ct)).Where(m => m.Uid >= minUid).ToList();
     }
 
     private static MessageSummary ToSummary(long folderId, IMessageSummary s)

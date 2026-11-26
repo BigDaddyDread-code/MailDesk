@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using MailDesk.Agent;
 using MailDesk.App.Services;
 using MailDesk.Core.Models;
+using MailDesk.Core.Rules;
 using MailDesk.Core.Services;
 using MailDesk.Core.Storage;
 
@@ -15,19 +16,22 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IMailSync _sync;
     private readonly IAgentService _agent;
     private readonly ProposalApplier _applier;
+    private readonly RuleRunner _rules;
 
-    public MainViewModel(IMailStore store, IMailSync sync, IAgentService agent, ProposalApplier applier)
+    public MainViewModel(IMailStore store, IMailSync sync, IAgentService agent, ProposalApplier applier, RuleRunner rules)
     {
         _store = store;
         _sync = sync;
         _agent = agent;
         _applier = applier;
+        _rules = rules;
     }
 
     public ObservableCollection<Account> Accounts { get; } = [];
     public ObservableCollection<FolderItem> Folders { get; } = [];
     public ObservableCollection<MessageSummary> Messages { get; } = [];
     public ObservableCollection<AgentProposal> Proposals { get; } = [];
+    public ObservableCollection<MailRule> Rules { get; } = [];
 
     [ObservableProperty] private FolderItem? _selectedFolder;
     [ObservableProperty] private MessageSummary? _selectedMessage;
@@ -43,6 +47,14 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Raised by the view to open the account dialog; returns the account plus its plaintext password, or null.</summary>
     public Func<Task<(Account account, string password)?>>? RequestAccountDialog { get; set; }
+
+    /// <summary>Raised by the view to open the rule editor. Returns the saved rule, or null if cancelled; the bool is "apply now".</summary>
+    public Func<MailRule?, long, IReadOnlyList<FolderChoice>, Task<(MailRule rule, bool applyNow)?>>? RequestRuleEditor { get; set; }
+
+    /// <summary>Raised by the view to show the rules window.</summary>
+    public Func<Task>? RequestRulesWindow { get; set; }
+
+    private Account? CurrentAccount => SelectedFolder?.Account ?? Accounts.FirstOrDefault();
 
     public async Task LoadAsync()
     {
@@ -109,6 +121,8 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    // ---------------- Accounts and sync ----------------
+
     [RelayCommand]
     private async Task AddAccountAsync()
     {
@@ -140,10 +154,32 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task SyncFolderAsync(FolderItem item)
     {
         var progress = new Progress<string>(s => StatusText = s);
-        await _sync.SyncFolderAsync(item.Account, item.Folder, progress: progress);
+        var fresh = await _sync.SyncFolderAsync(item.Account, item.Folder, progress: progress);
         item.UnreadCount = item.Folder.UnreadCount;
+
+        // Rules run on new Inbox mail only. Other folders are where rules put things.
+        if (item.Kind == FolderKind.Inbox && fresh.Count > 0)
+        {
+            var result = await _rules.RunAsync(item.Account, fresh);
+            if (result.Matched > 0)
+            {
+                StatusText = $"{fresh.Count} new. {result.Summary()}";
+                await ReloadFoldersKeepingSelectionAsync();
+            }
+        }
         if (ReferenceEquals(item, SelectedFolder)) await LoadMessagesAsync();
     }
+
+    private async Task ReloadFoldersKeepingSelectionAsync()
+    {
+        var selectedName = SelectedFolder?.Folder.FullName;
+        var selectedAccount = SelectedFolder?.Account.Id;
+        await LoadAsync();
+        if (selectedName is not null)
+            SelectedFolder = Folders.FirstOrDefault(f => f.Account.Id == selectedAccount && f.Folder.FullName == selectedName) ?? SelectedFolder;
+    }
+
+    // ---------------- Search ----------------
 
     [RelayCommand]
     private async Task SearchAsync()
@@ -160,6 +196,8 @@ public sealed partial class MainViewModel : ObservableObject
         ListSubtitle = $"{Messages.Count} results";
         StatusText = $"{Messages.Count} results";
     }
+
+    // ---------------- Message actions ----------------
 
     [RelayCommand]
     private async Task ToggleFlagAsync(MessageSummary? message)
@@ -183,6 +221,96 @@ public sealed partial class MainViewModel : ObservableObject
             Messages.Remove(message);
         });
     }
+
+    // ---------------- Rules ----------------
+
+    private IReadOnlyList<FolderChoice> FolderChoicesFor(Account account) =>
+        Folders.Where(f => f.Account.Id == account.Id && f.Kind is FolderKind.Other or FolderKind.Archive or FolderKind.Junk)
+               .Select(f => new FolderChoice(f.Folder.FullName, f.DisplayName)).ToList();
+
+    public async Task LoadRulesAsync()
+    {
+        Rules.Clear();
+        var account = CurrentAccount;
+        if (account is null) return;
+        foreach (var r in await _store.GetRulesAsync(account.Id)) Rules.Add(r);
+    }
+
+    [RelayCommand]
+    private async Task OpenRulesAsync()
+    {
+        if (RequestRulesWindow is null || CurrentAccount is null) return;
+        await LoadRulesAsync();
+        await RequestRulesWindow();
+    }
+
+    [RelayCommand]
+    private Task NewRuleAsync() => EditRuleAsync(null);
+
+    [RelayCommand]
+    private async Task EditRuleAsync(MailRule? rule)
+    {
+        var account = CurrentAccount;
+        if (RequestRuleEditor is null || account is null) return;
+        var result = await RequestRuleEditor(rule, account.Id, FolderChoicesFor(account));
+        if (result is null) return;
+        var (saved, applyNow) = result.Value;
+        await _store.UpsertRuleAsync(saved);
+        await LoadRulesAsync();
+        StatusText = $"Rule saved: {saved.Name}";
+        if (applyNow) await ApplyRulesToCurrentFolderAsync([saved]);
+    }
+
+    [RelayCommand]
+    private async Task CreateRuleFromSenderAsync(MessageSummary? message)
+    {
+        if (message is null) return;
+        var seed = new MailRule
+        {
+            Name = "",
+            Conditions = [new RuleCondition(RuleField.FromAddress, RuleOperator.Equals, message.FromAddress)],
+            Action = RuleAction.MoveToFolder,
+        };
+        await EditRuleAsync(seed);
+    }
+
+    [RelayCommand]
+    private async Task DeleteRuleAsync(MailRule? rule)
+    {
+        if (rule is null) return;
+        await _store.DeleteRuleAsync(rule.Id);
+        Rules.Remove(rule);
+        StatusText = $"Rule deleted: {rule.Name}";
+    }
+
+    [RelayCommand]
+    private async Task ToggleRuleEnabledAsync(MailRule? rule)
+    {
+        if (rule is null) return;
+        rule.Enabled = !rule.Enabled;
+        await _store.UpsertRuleAsync(rule);
+        await LoadRulesAsync();
+    }
+
+    [RelayCommand]
+    private Task RunRulesNowAsync() => ApplyRulesToCurrentFolderAsync(null);
+
+    private async Task ApplyRulesToCurrentFolderAsync(IReadOnlyList<MailRule>? only)
+    {
+        if (SelectedFolder is null) return;
+        var folder = SelectedFolder;
+        await RunBusyAsync($"Running rules on {folder.DisplayName}...", async () =>
+        {
+            var candidates = await _store.GetMessagesAsync(folder.Folder.Id, limit: 10_000);
+            var result = await _rules.RunAsync(folder.Account, candidates, only);
+            StatusText = result.Summary();
+            await LoadRulesAsync();
+            if (result.Moved > 0) await ReloadFoldersKeepingSelectionAsync();
+            await LoadMessagesAsync();
+        });
+    }
+
+    // ---------------- Agent ----------------
 
     [RelayCommand]
     private async Task RunTriageAsync()
@@ -215,8 +343,8 @@ public sealed partial class MainViewModel : ObservableObject
                 StatusText = $"Failed: {ex.Message}";
             }
             Proposals.Remove(proposal);
-            await LoadMessagesAsync();
-            await LoadAsync();
+            if (proposal.Kind == ProposalKind.CreateRule) await LoadRulesAsync();
+            else { await ReloadFoldersKeepingSelectionAsync(); await LoadMessagesAsync(); }
         });
     }
 

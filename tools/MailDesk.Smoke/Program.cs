@@ -11,11 +11,14 @@
 //   6. Create folder "MailDesk Smoke", move the newest Inbox message into it,
 //      sync it, move it back to Inbox, delete the folder (message ends where it started)
 //   7. Run the heuristic triage agent          (proposes only, applies nothing)
+//   8. Create a rule for the newest sender, run rules on the Inbox, confirm the matching
+//      messages landed in "MailDesk Smoke Rules", move them back, delete rule and folder
 //
 // Usage: dotnet run --project tools/MailDesk.Smoke [path-to-maildesk.db]
 
 using MailDesk.Agent;
 using MailDesk.Core.Models;
+using MailDesk.Core.Rules;
 using MailDesk.Core.Security;
 using MailDesk.Core.Storage;
 using MailDesk.Mail;
@@ -118,6 +121,47 @@ await Step("7. Heuristic triage (proposes only)", async () =>
     var proposals = await agent.ProposeTriageAsync(account.Id, inbox.Id);
     Console.WriteLine($"   {proposals.Count} proposals");
     foreach (var p in proposals) Console.WriteLine($"   - {p.Title}");
+});
+
+await Step("8. Rule: match newest sender, run on Inbox, verify move, restore", async () =>
+{
+    var target = (await store.GetMessagesAsync(inbox.Id, limit: 1)).First();
+    var rule = new MailRule
+    {
+        AccountId = account.Id,
+        Name = "MailDesk Smoke rule",
+        Conditions = [new RuleCondition(RuleField.FromAddress, RuleOperator.Equals, target.FromAddress)],
+        Action = RuleAction.MoveToFolder,
+        TargetFolder = "MailDesk Smoke Rules",
+    };
+    await store.UpsertRuleAsync(rule);
+    MailFolder? created = null;
+    try
+    {
+        var runner = new RuleRunner(store, sync);
+        var candidates = await store.GetMessagesAsync(inbox.Id, limit: 10_000);
+        var expected = candidates.Count(m => string.Equals(m.FromAddress, target.FromAddress, StringComparison.OrdinalIgnoreCase));
+        var result = await runner.RunAsync(account, candidates);
+        Console.WriteLine($"   {result.Summary()} (expected {expected})");
+        Require(result.Moved == expected, $"moved {result.Moved}, expected {expected}");
+
+        created = (await store.GetFoldersAsync(account.Id)).FirstOrDefault(f => f.DisplayName == "MailDesk Smoke Rules");
+        Require(created is not null, "rule did not create its target folder");
+        var landed = await sync.SyncFolderAsync(account, created!);
+        Require(landed.Count == expected, $"{landed.Count} arrived in the rule folder, expected {expected}");
+        var hits = (await store.GetRulesAsync(account.Id)).First(r => r.Id == rule.Id).HitCount;
+        Require(hits == expected, $"hit count {hits}, expected {expected}");
+
+        await sync.MoveAsync(account, landed, inbox);
+        await sync.SyncFolderAsync(account, inbox);
+        Console.WriteLine($"   {expected} message(s) moved by rule and moved back; hit count {hits}");
+    }
+    finally
+    {
+        await store.DeleteRuleAsync(rule.Id);
+        if (created is not null) await sync.DeleteFolderAsync(account, created);
+        Console.WriteLine("   rule and folder removed");
+    }
 });
 
 Console.WriteLine();

@@ -34,6 +34,7 @@ public partial class App : Application
         services.AddSingleton<IMailSync, ImapMailSync>();
         services.AddSingleton<IAgentService, HeuristicTriageAgent>();
         services.AddSingleton<ProposalApplier>();
+        services.AddSingleton<MailDesk.Core.Rules.RuleRunner>();
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
         Services = services.BuildServiceProvider();

@@ -34,6 +34,12 @@ public interface IMailStore
 
     // Stats used by the agent
     Task<IReadOnlyList<SenderStat>> GetSenderStatsAsync(long folderId, int top = 100, CancellationToken ct = default);
+
+    // Rules
+    Task<IReadOnlyList<MailRule>> GetRulesAsync(long accountId, CancellationToken ct = default);
+    Task<long> UpsertRuleAsync(MailRule rule, CancellationToken ct = default);
+    Task DeleteRuleAsync(long ruleId, CancellationToken ct = default);
+    Task IncrementRuleHitsAsync(long ruleId, int count, CancellationToken ct = default);
 }
 
 public sealed record SenderStat(string FromAddress, string FromName, long Count, long UnreadCount, string ExampleSubject);

@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Windows;
 using System.Windows.Input;
 using MailDesk.App.ViewModels;
 using MailDesk.App.Views;
@@ -24,6 +25,8 @@ public partial class MainWindow : FluentWindow
         InitializeComponent();
         DataContext = vm;
         vm.RequestAccountDialog = ShowAccountDialogAsync;
+        vm.RequestRuleEditor = ShowRuleEditorAsync;
+        vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += async (_, _) => await InitReaderAsync();
     }
@@ -73,10 +76,27 @@ public partial class MainWindow : FluentWindow
             _vm.SearchCommand.Execute(null);
     }
 
+    /// <summary>The window the user is looking at, so dialogs stack correctly over the rules window too.</summary>
+    private Window ActiveOwner() =>
+        Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+
     private Task<(Account account, string password)?> ShowAccountDialogAsync()
     {
         var dialog = new AccountDialog(_sync, _protector) { Owner = this };
         var ok = dialog.ShowDialog() == true;
         return Task.FromResult(ok ? dialog.Result : null);
+    }
+
+    private Task<(MailRule rule, bool applyNow)?> ShowRuleEditorAsync(MailRule? rule, long accountId, IReadOnlyList<FolderChoice> folders)
+    {
+        var editor = new RuleEditorWindow(new RuleEditorViewModel(rule, accountId, folders)) { Owner = ActiveOwner() };
+        var ok = editor.ShowDialog() == true && editor.Result is not null;
+        return Task.FromResult(ok ? (editor.Result!, editor.ApplyNow) : ((MailRule, bool)?)null);
+    }
+
+    private Task ShowRulesWindowAsync()
+    {
+        new RulesWindow(_vm) { Owner = this }.ShowDialog();
+        return Task.CompletedTask;
     }
 }

@@ -1,0 +1,72 @@
+<ui:FluentWindow x:Class="MailDesk.App.Views.RuleEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:vm="clr-namespace:MailDesk.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DataContext="{d:DesignInstance Type=vm:RuleEditorViewModel}"
+        Title="Rule" Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        ExtendsContentIntoTitleBar="True" WindowBackdropType="None" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource SurfaceBrush}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <ui:TitleBar Title="Rule" ShowMaximize="False" ShowMinimize="False" />
+        <StackPanel Grid.Row="1" Margin="20,8,20,20">
+            <TextBlock Text="Name" FontWeight="SemiBold" Margin="0,0,0,4" />
+            <ui:TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Optional. Generated from the conditions if left blank." Margin="0,0,0,14" />
+
+            <TextBlock Text="When all of these match" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <ItemsControl ItemsSource="{Binding Conditions}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:ConditionItem}">
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="130" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox ItemsSource="{Binding DataContext.Fields, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      SelectedItem="{Binding Field}" Margin="0,0,6,0" />
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding DataContext.Operators, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                      SelectedItem="{Binding Operator}" Margin="0,0,6,0" />
+                            <ui:TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="value" />
+                            <Button Grid.Column="3" Content="&#xE711;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="6,0,0,0" Padding="8,4"
+                                    ToolTip="Remove condition" Background="Transparent" BorderThickness="0"
+                                    Command="{Binding DataContext.RemoveConditionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Button Content="+ Add condition" HorizontalAlignment="Left" Background="Transparent" BorderThickness="0" Padding="4,2"
+                    Foreground="{StaticResource SidebarSelectedBrush}" Command="{Binding AddConditionCommand}" Margin="0,0,0,14" />
+
+            <TextBlock Text="Then" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="200" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ComboBox ItemsSource="{Binding Actions}" SelectedItem="{Binding Action}" Margin="0,0,8,0" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding Folders}" DisplayMemberPath="DisplayName" SelectedValuePath="FullName"
+                          SelectedValue="{Binding TargetFolder}" IsEditable="True" Text="{Binding TargetFolder, UpdateSourceTrigger=PropertyChanged}"
+                          ToolTip="Pick a folder or type a new name; it is created on first use"
+                          Visibility="{Binding IsMoveToFolder, Converter={StaticResource BoolToVisibility}}" />
+            </Grid>
+
+            <CheckBox Content="Enabled" IsChecked="{Binding Enabled}" Margin="0,0,0,4" />
+            <CheckBox Content="Also apply to the messages already in the current folder" IsChecked="{Binding ApplyNow}" Margin="0,0,0,12" />
+
+            <TextBlock Text="{Binding Error}" Foreground="#E01E5A" TextWrapping="Wrap" Margin="0,0,0,8" />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" Padding="14,6" />
+                <Button Content="Save rule" Click="Save_Click" Style="{StaticResource TopBarPrimaryButtonStyle}" />
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</ui:FluentWindow>

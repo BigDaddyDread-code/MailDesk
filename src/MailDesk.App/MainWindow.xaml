@@ -49,10 +49,16 @@
                                 <TextBlock Text="Sync" />
                             </StackPanel>
                         </Button>
-                        <Button Style="{StaticResource TopBarPrimaryButtonStyle}" Command="{Binding RunTriageCommand}">
+                        <Button Style="{StaticResource TopBarPrimaryButtonStyle}" Command="{Binding RunTriageCommand}" Margin="0,0,6,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
                                 <TextBlock Text="Tidy with agent" />
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenRulesCommand}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE71C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Rules" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -155,6 +161,8 @@
                             <ContextMenu x:Key="RowMenu">
                                 <MenuItem Header="Toggle flag" Command="{Binding PlacementTarget.Tag.ToggleFlagCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                 <MenuItem Header="Move to Trash" Command="{Binding PlacementTarget.Tag.MoveToTrashCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <Separator />
+                                <MenuItem Header="Create rule from sender..." Command="{Binding PlacementTarget.Tag.CreateRuleFromSenderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                             </ContextMenu>
                         </ListView.Resources>
                         <ListView.ItemTemplate>

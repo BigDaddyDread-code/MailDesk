@@ -14,8 +14,11 @@ public interface IMailSync
     /// <summary>Refreshes the folder list for the account into the store.</summary>
     Task SyncFoldersAsync(Account account, CancellationToken ct = default);
 
-    /// <summary>Fetches new headers for a folder. On first sync, pulls the most recent <paramref name="initialBatch"/> messages.</summary>
-    Task SyncFolderAsync(Account account, MailFolder folder, int initialBatch = 500, IProgress<string>? progress = null, CancellationToken ct = default);
+    /// <summary>
+    /// Fetches new headers for a folder and returns the messages that were new to the cache.
+    /// On first sync, pulls the most recent <paramref name="initialBatch"/> messages.
+    /// </summary>
+    Task<IReadOnlyList<MessageSummary>> SyncFolderAsync(Account account, MailFolder folder, int initialBatch = 500, IProgress<string>? progress = null, CancellationToken ct = default);
 
     /// <summary>Downloads and caches the body of a message, returning it.</summary>
     Task<MessageBody> FetchBodyAsync(Account account, MessageSummary message, CancellationToken ct = default);
