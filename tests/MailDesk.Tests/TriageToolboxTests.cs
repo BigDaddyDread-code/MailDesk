@@ -165,6 +165,44 @@ public sealed class TriageToolboxTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Mailbox_toolbox_searches_lists_reads_and_remembers_sources()
+    {
+        var box = new MailboxToolbox(_store, null, _account);
+        var search = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("search_messages", J(new { query = "jobs" })));
+        Assert.Equal(2, search.GetProperty("total").GetInt32());
+        Assert.Equal("Inbox", search.GetProperty("messages")[0].GetProperty("folder").GetString());
+
+        var list = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("list_messages", J(new { folder = "other", limit = 5 })));
+        Assert.Equal("Other", list.GetProperty("folder").GetString());
+        Assert.Equal(1, list.GetProperty("messages").GetArrayLength());
+
+        var lunch = (await _store.GetMessagesAsync(_inbox.Id)).Single(m => m.Uid == 3);
+        await _store.SaveBodyAsync(new MessageBody { MessageId = lunch.Id, TextBody = "Thursday at noon?" });
+        var got = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("get_message", J(new { id = lunch.Id })));
+        Assert.Equal("Thursday at noon?", got.GetProperty("body").GetString());
+
+        var missing = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("get_message", J(new { id = 999_999 })));
+        Assert.True(missing.TryGetProperty("error", out _));
+
+        Assert.Equal(4, box.Consulted.Count); // two job alerts, the "other" message, lunch
+        Assert.Contains(box.Consulted, m => m.Id == lunch.Id);
+    }
+
+    [Fact]
+    public void Insight_parser_tolerates_fences_and_chatter()
+    {
+        var insight = InsightsService.Parse("Sure! ```json\n{\"summary\":\"Rates are due.\",\"action_items\":[\"Pay $412.50 by 20 Dec\",\" \"],\"suggested_replies\":[\"Thanks, paid.\",\"a\",\"b\",\"c\"],\"tone\":\"formal\"}\n```");
+        Assert.Equal("Rates are due.", insight.Summary);
+        Assert.Equal(["Pay $412.50 by 20 Dec"], insight.ActionItems);
+        Assert.Equal(3, insight.SuggestedReplies.Count);
+        Assert.True(insight.HasActions);
+
+        var plain = InsightsService.Parse("I could not read that.");
+        Assert.Equal("I could not read that.", plain.Summary);
+        Assert.False(plain.HasReplies);
+    }
+
+    [Fact]
     public void Tool_schemas_are_valid_json_objects()
     {
         foreach (var t in TriageToolbox.Tools)

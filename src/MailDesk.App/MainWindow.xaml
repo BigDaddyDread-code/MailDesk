@@ -275,6 +275,13 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top" Margin="12,0,0,0">
+                            <Button Command="{Binding SummariseCommand}" ToolTip="Summarise with AI: summary, to-dos and reply options" Background="Transparent" BorderThickness="0" Padding="8,4"
+                                    IsEnabled="{Binding IsSummarising, Converter={StaticResource Invert}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:ProgressRing IsIndeterminate="True" Width="14" Height="14" Margin="0,0,6,0" Visibility="{Binding IsSummarising, Converter={StaticResource BoolToVisibility}}" />
+                                    <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="#5B2C5C" />
+                                </StackPanel>
+                            </Button>
                             <Button Command="{Binding ReplyCommand}" ToolTip="Reply" Background="Transparent" BorderThickness="0" Padding="8,4">
                                 <TextBlock Text="&#xE97A;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
                             </Button>
@@ -313,10 +320,65 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
+                    <!-- AI insight card -->
+                    <Border Grid.Row="0" Padding="16,12" Margin="16,12,16,4" CornerRadius="8" Background="#F7F3FB" BorderBrush="#D9CDEB" BorderThickness="1"
+                            VerticalAlignment="Top"
+                            Visibility="{Binding Insight, Converter={StaticResource NullToVisibility}}">
+                        <Grid DataContext="{Binding Insight}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="20" Foreground="#5B2C5C" Margin="0,2,14,0" VerticalAlignment="Top" />
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="{Binding Summary}" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" FontSize="13" />
+                                <TextBlock Text="To do" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource MutedTextBrush}" Margin="0,10,0,2"
+                                           Visibility="{Binding HasActions, Converter={StaticResource BoolToVisibility}}" />
+                                <ItemsControl ItemsSource="{Binding ActionItems}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock FontSize="13" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" VerticalAlignment="Center">
+                                                    <Run Text="• " /><Run Text="{Binding Mode=OneWay}" />
+                                                </TextBlock>
+                                                <Button Grid.Column="1" Content="Add task" FontSize="11" Padding="8,2" Margin="10,0,0,0" Background="Transparent"
+                                                        Command="{Binding DataContext.AddActionTaskCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="Quick replies" FontWeight="SemiBold" FontSize="12" Foreground="{StaticResource MutedTextBrush}" Margin="0,10,0,4"
+                                           Visibility="{Binding HasReplies, Converter={StaticResource BoolToVisibility}}" />
+                                <ItemsControl ItemsSource="{Binding SuggestedReplies}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Padding="10,5" Margin="0,0,6,6" MaxWidth="320" HorizontalContentAlignment="Left" ToolTip="Open a reply with this text"
+                                                    Command="{Binding DataContext.UseSuggestedReplyCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}">
+                                                <TextBlock Text="{Binding Mode=OneWay}" TextWrapping="Wrap" FontSize="12" />
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="{Binding ModelNote}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="&#xE711;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="10" Background="Transparent" BorderThickness="0"
+                                    Padding="6,2" VerticalAlignment="Top" ToolTip="Close"
+                                    Command="{Binding DataContext.CloseInsightCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                        </Grid>
+                    </Border>
                     <!-- Blocked images bar -->
-                    <Border Padding="14,8" Background="#FFF8E1" BorderBrush="#F0D28A" BorderThickness="0,0,0,1"
+                    <Border Grid.Row="1" Padding="14,8" Background="#FFF8E1" BorderBrush="#F0D28A" BorderThickness="0,0,0,1"
                             Visibility="{Binding HasBlockedImages, Converter={StaticResource BoolToVisibility}}">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -334,7 +396,7 @@
                         </Grid>
                     </Border>
                     <!-- Invite card -->
-                    <Border Grid.Row="1" Padding="16,12" Margin="16,12,16,4" CornerRadius="8" Background="#F3F8FF" BorderBrush="#BBD3F2" BorderThickness="1"
+                    <Border Grid.Row="2" Padding="16,12" Margin="16,12,16,4" CornerRadius="8" Background="#F3F8FF" BorderBrush="#BBD3F2" BorderThickness="1"
                             Visibility="{Binding Invite, Converter={StaticResource NullToVisibility}}">
                         <Grid DataContext="{Binding Invite}">
                             <Grid.ColumnDefinitions>
@@ -365,7 +427,7 @@
                             </StackPanel>
                         </Grid>
                     </Border>
-                    <wv2:WebView2 x:Name="Reader" Grid.Row="2" DefaultBackgroundColor="White" />
+                    <wv2:WebView2 x:Name="Reader" Grid.Row="3" DefaultBackgroundColor="White" />
                 </Grid>
             </Grid>
 
@@ -376,11 +438,85 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="Agent proposals" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}" />
-                    <StackPanel Grid.Row="1" Margin="0,4,0,12">
+
+                    <!-- Ask your mailbox -->
+                    <Grid>
+                        <TextBlock Text="Ask your mailbox" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}" />
+                        <Button Content="Clear" HorizontalAlignment="Right" FontSize="11" Padding="8,2" Background="Transparent" BorderThickness="0"
+                                Foreground="{StaticResource MutedTextBrush}" Command="{Binding ClearChatCommand}"
+                                Visibility="{Binding Chat.Count, Converter={StaticResource ZeroToVisibility}, ConverterParameter=invert}" />
+                    </Grid>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,6,0,6" x:Name="ChatScroll">
+                        <StackPanel>
+                            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" FontSize="12"
+                                       Text="Questions like &quot;what did the council say about rates?&quot; or &quot;anything from school this week?&quot; The model searches and reads your mail to answer. It cannot change anything."
+                                       Visibility="{Binding Chat.Count, Converter={StaticResource ZeroToVisibility}}" />
+                            <ItemsControl ItemsSource="{Binding Chat}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:ChatEntry}">
+                                        <Border Margin="0,0,0,8" Padding="10,8" CornerRadius="8" BorderThickness="1" MaxWidth="300">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="White" />
+                                                    <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
+                                                    <Setter Property="HorizontalAlignment" Value="Left" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding FromUser}" Value="True">
+                                                            <Setter Property="Background" Value="#E8EEF7" />
+                                                            <Setter Property="BorderBrush" Value="#C9D6EA" />
+                                                            <Setter Property="HorizontalAlignment" Value="Right" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsError}" Value="True">
+                                                            <Setter Property="Background" Value="#FDE7EC" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextBrush}" />
+                                                <ItemsControl ItemsSource="{Binding Sources}" Margin="0,6,0,0" Visibility="{Binding HasSources, Converter={StaticResource BoolToVisibility}}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate DataType="{x:Type models:MessageSummary}">
+                                                            <Button Background="Transparent" BorderThickness="0" Padding="0" Margin="0,1" HorizontalAlignment="Left" Cursor="Hand"
+                                                                    Command="{Binding DataContext.OpenSourceMessageCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}">
+                                                                <TextBlock FontSize="11" Foreground="{StaticResource SidebarSelectedBrush}" TextTrimming="CharacterEllipsis" MaxWidth="270">
+                                                                    <Run Text="&#xE715;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" /><Run Text=" " /><Run Text="{Binding FromDisplay, Mode=OneWay}" /><Run Text=": " /><Run Text="{Binding Subject, Mode=OneWay}" />
+                                                                </TextBlock>
+                                                            </Button>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                                <TextBlock Text="{Binding Note}" FontSize="10" Foreground="{StaticResource MutedTextBrush}" Margin="0,4,0,0"
+                                                           Visibility="{Binding Note, Converter={StaticResource NonEmptyToVisibility}}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ui:ProgressRing IsIndeterminate="True" Width="18" Height="18" HorizontalAlignment="Left" Margin="4,0,0,8"
+                                             Visibility="{Binding IsAsking, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                    <Grid Grid.Row="2" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox x:Name="QuestionBox" Text="{Binding Question, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Ask about your mail..." KeyDown="QuestionBox_KeyDown"
+                                    IsEnabled="{Binding IsAsking, Converter={StaticResource Invert}}" />
+                        <Button Grid.Column="1" Content="Ask" Style="{StaticResource TopBarPrimaryButtonStyle}" Margin="6,0,0,0" Command="{Binding AskCommand}"
+                                IsEnabled="{Binding IsAsking, Converter={StaticResource Invert}}" />
+                    </Grid>
+
+                    <!-- Proposals -->
+                    <TextBlock Grid.Row="3" Text="Agent proposals" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}" />
+                    <StackPanel Grid.Row="4" Margin="0,4,0,12">
                         <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" FontSize="12"
                                    Text="Nothing moves until you approve it. Approved moves go to Trash or Junk, never permanent delete." />
                         <Border Margin="0,8,0,0" Padding="10" CornerRadius="6" Background="White" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1"
@@ -388,7 +524,7 @@
                             <TextBlock Text="{Binding AgentSummary}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextBrush}" />
                         </Border>
                     </StackPanel>
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer Grid.Row="5" VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Proposals}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type agent:AgentProposal}">

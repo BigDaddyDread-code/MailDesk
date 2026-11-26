@@ -5,6 +5,7 @@ using MailDesk.Agent;
 using MailDesk.App.Services;
 using MailDesk.Core.Models;
 using MailDesk.Core.Rules;
+using MailDesk.Core.Security;
 using MailDesk.Core.Services;
 using MailDesk.Core.Storage;
 
@@ -289,12 +290,14 @@ public sealed partial class MainViewModel : ObservableObject
         if (message is null || SelectedFolder is null)
         {
             ReaderHtml = MailHtml.Empty();
+            Insight = null;
             return;
         }
         try
         {
             ReaderHtml = MailHtml.Empty("Loading...");
             Invite = null;
+            Insight = null;
             HasBlockedImages = false;
             var body = await _sync.FetchBodyAsync(SelectedFolder.Account, message);
             if (!ReferenceEquals(message, SelectedMessage)) return; // user moved on while the body was downloading
@@ -315,6 +318,98 @@ public sealed partial class MainViewModel : ObservableObject
             ReaderHtml = MailHtml.Empty($"Could not load message: {ex.Message}");
         }
     }
+
+    // ---------------- AI: summarise and ask ----------------
+
+    /// <summary>Supplied by the view: the credential protector, needed to build a model client on demand.</summary>
+    public Func<ICredentialProtector>? RequestProtector { get; set; }
+
+    [ObservableProperty] private MessageInsight? _insight;
+    [ObservableProperty] private bool _isSummarising;
+
+    /// <summary>One click: the open message's text goes to the model and comes back as a summary, to-dos and reply options.</summary>
+    [RelayCommand]
+    private async Task SummariseAsync()
+    {
+        if (SelectedMessage is null || SelectedFolder is null || RequestProtector is null) return;
+        var message = SelectedMessage;
+        var account = SelectedFolder.Account;
+        IsSummarising = true;
+        try
+        {
+            var client = await ModelClients.CreateAsync(_store, RequestProtector());
+            var body = _currentBody ?? await _sync.FetchBodyAsync(account, message);
+            var text = Core.Text.ComposeBuilder.BodyText(body);
+            if (string.IsNullOrWhiteSpace(text)) text = message.Snippet;
+            var insight = await InsightsService.AnalyzeAsync(client, account.Name, message, text);
+            if (ReferenceEquals(message, SelectedMessage)) Insight = insight;
+            StatusText = $"Summarised with {insight.ModelNote}.";
+        }
+        catch (Exception ex) { StatusText = $"Summarise failed: {ex.Message}"; }
+        finally { IsSummarising = false; }
+    }
+
+    [RelayCommand]
+    private void CloseInsight() => Insight = null;
+
+    /// <summary>An action item from the summary becomes a task linked to the message.</summary>
+    [RelayCommand]
+    private async Task AddActionTaskAsync(string? item)
+    {
+        if (string.IsNullOrWhiteSpace(item) || SelectedMessage is null || SelectedFolder is null) return;
+        await _store.UpsertTaskAsync(new TaskItem
+        {
+            AccountId = SelectedFolder.Account.Id, Title = item.Trim(), Notes = $"From {SelectedMessage.FromDisplay}",
+            SourceMessageId = SelectedMessage.Id, SourceSubject = SelectedMessage.Subject,
+        });
+        StatusText = $"Task added: {item.Trim()}";
+    }
+
+    /// <summary>A suggested reply opens the compose window as a reply with that text above the quote. The user still sends.</summary>
+    [RelayCommand]
+    private async Task UseSuggestedReplyAsync(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || SelectedMessage is null || SelectedFolder is null) return;
+        var body = await _store.GetBodyAsync(SelectedMessage.Id);
+        var seed = Core.Text.ComposeBuilder.Reply(SelectedMessage, body, SelectedFolder.Account.Email, replyAll: false);
+        seed.TextBody = text.Trim() + seed.TextBody;
+        await OpenComposeAsync(seed);
+    }
+
+    public ObservableCollection<ChatEntry> Chat { get; } = [];
+    [ObservableProperty] private string _question = "";
+    [ObservableProperty] private bool _isAsking;
+
+    /// <summary>Ask your mailbox: the question, prior turns and the model's tool reads stay in this session only.</summary>
+    [RelayCommand]
+    private async Task AskAsync()
+    {
+        var question = Question.Trim();
+        var account = CurrentAccount;
+        if (question.Length == 0 || account is null || RequestProtector is null || IsAsking) return;
+        IsAgentPaneOpen = true;
+        var history = Chat.Select(c => new ChatTurn(c.FromUser, c.Text)).ToList();
+        Chat.Add(new ChatEntry { FromUser = true, Text = question });
+        Question = "";
+        IsAsking = true;
+        try
+        {
+            var client = await ModelClients.CreateAsync(_store, RequestProtector());
+            var answer = await new MailboxAssistant(_store, _sync).AskAsync(client, account, history, question);
+            Chat.Add(new ChatEntry { FromUser = false, Text = answer.Text, Sources = answer.Sources.ToList(), Note = answer.ModelNote });
+        }
+        catch (Exception ex)
+        {
+            Chat.Add(new ChatEntry { FromUser = false, Text = $"Sorry, that failed: {ex.Message}", IsError = true });
+        }
+        finally { IsAsking = false; }
+    }
+
+    [RelayCommand]
+    private void ClearChat() => Chat.Clear();
+
+    [RelayCommand]
+    private Task OpenSourceMessageAsync(MessageSummary? message) => message is null ? Task.CompletedTask : OpenMessageAsync(message.Id);
 
     // ---------------- Remote images ----------------
 

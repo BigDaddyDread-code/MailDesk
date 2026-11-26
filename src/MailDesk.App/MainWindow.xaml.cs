@@ -36,6 +36,7 @@ public partial class MainWindow : FluentWindow
         vm.RequestAiSettings = () => { new AiSettingsWindow(_store, _protector) { Owner = this }.ShowDialog(); return Task.CompletedTask; };
         vm.RequestCalendar = account => { new CalendarWindow(new CalendarViewModel(_store, account, _sender)) { Owner = this }.Show(); return Task.CompletedTask; };
         vm.RequestSender = () => _sender;
+        vm.RequestProtector = () => _protector;
         vm.RequestTasks = account =>
         {
             var tasksVm = new TasksViewModel(_store, account.Id) { RequestOpenMessage = id => { Activate(); return _vm.OpenMessageAsync(id); } };
@@ -85,6 +86,11 @@ public partial class MainWindow : FluentWindow
     {
         if (e.PropertyName == nameof(MainViewModel.ReaderHtml) && _readerReady)
             Reader.NavigateToString(_vm.ReaderHtml);
+    }
+
+    private void QuestionBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && _vm.AskCommand.CanExecute(null)) _vm.AskCommand.Execute(null);
     }
 
     private void SearchBox_KeyDown(object sender, KeyEventArgs e)

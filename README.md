@@ -111,6 +111,19 @@ hide done ones. Overdue tasks are marked. A task made from a message keeps a lin
 Drag one or more messages from the list onto a folder in the sidebar to move them. Multi-select with Ctrl or Shift. The
 folder under the pointer highlights green when it can take the drop; Drafts and other accounts' folders refuse it.
 
+## Summarise and ask
+
+The sparkle button in the reader header sends the open message to the model named in AI settings and shows a card above
+the body: a short summary, the things the mail asks you to do (each with **Add task**), and up to three quick replies that
+open the compose window with that text above the quote. Scams are called out and get no replies.
+
+**Ask your mailbox** sits at the top of the agent pane (the robot icon). Type a question such as "what did the council say
+about rates?" and the model answers by searching and reading your mail through read-only tools (`search_messages`,
+`list_messages`, `get_message`, `list_folders`). Each answer lists the messages it looked at; click one to open it. The
+conversation is kept for follow-up questions until you clear it, and nothing in it can move, send or delete mail.
+
+Both send message text to the provider, and both only run when you click.
+
 ## Writing with AI
 
 The compose window has a bar above the body: type what the email should say (or leave it empty when replying) and click

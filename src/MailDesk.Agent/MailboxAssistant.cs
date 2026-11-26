@@ -1,0 +1,190 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using MailDesk.Core.Models;
+using MailDesk.Core.Services;
+using MailDesk.Core.Storage;
+using MailDesk.Core.Text;
+
+namespace MailDesk.Agent;
+
+/// <summary>
+/// Read-only tools for answering questions about the mailbox: search, list, read one message. Reading a message sends
+/// its text to the model, which is what the user asked for by asking the question. Nothing here can change anything.
+/// </summary>
+public sealed class MailboxToolbox
+{
+    private static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+    private const int MaxBodyChars = 8_000;
+
+    private readonly IMailStore _store;
+    private readonly IMailSync? _sync;
+    private readonly Account _account;
+
+    public MailboxToolbox(IMailStore store, IMailSync? sync, Account account)
+    {
+        _store = store;
+        _sync = sync;
+        _account = account;
+    }
+
+    /// <summary>Messages the model opened or found, in order, so the answer can link to them.</summary>
+    public List<MessageSummary> Consulted { get; } = [];
+
+    public static readonly IReadOnlyList<TriageToolbox.ToolSpec> Tools =
+    [
+        new("search_messages", "Full-text search over subject, sender and preview across every folder. A word that is also a folder name returns that folder's mail; 'in:finance invoice' limits to folders named like finance. Returns id, folder, from, subject, date, read state and preview.",
+            new { type = "object", properties = new
+            {
+                query = new { type = "string" },
+                limit = new { type = "integer", description = "Default 30, max 100" },
+            }, required = new[] { "query" }, additionalProperties = false }),
+        new("list_messages", "Newest messages in a folder (default Inbox), optionally unread only. Returns the same fields as search_messages.",
+            new { type = "object", properties = new
+            {
+                folder = new { type = "string", description = "Folder display name, e.g. Inbox, Sent, Finance & Bills" },
+                unread_only = new { type = "boolean" },
+                limit = new { type = "integer", description = "Default 30, max 100" },
+            }, additionalProperties = false }),
+        new("get_message", "The full text of one message by id, plus headers. Use it when the preview is not enough to answer.",
+            new { type = "object", properties = new { id = new { type = "integer" } }, required = new[] { "id" }, additionalProperties = false }),
+        new("list_folders", "Folders with counts.",
+            new { type = "object", properties = new { }, additionalProperties = false }),
+    ];
+
+    public async Task<string> ExecuteAsync(string name, JsonElement input, CancellationToken ct = default)
+    {
+        try
+        {
+            return name switch
+            {
+                "search_messages" => await SearchAsync(Str(input, "query") ?? "", Int(input, "limit", 30, 100), ct),
+                "list_messages" => await ListAsync(Str(input, "folder"), Bool(input, "unread_only"), Int(input, "limit", 30, 100), ct),
+                "get_message" => await GetAsync(input, ct),
+                "list_folders" => await FoldersAsync(ct),
+                _ => JsonSerializer.Serialize(new { error = $"Unknown tool '{name}'." }),
+            };
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message });
+        }
+    }
+
+    private async Task<string> SearchAsync(string query, int limit, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return JsonSerializer.Serialize(new { error = "query is required" });
+        var hits = await _store.SearchAsync(query, _account.Id, null, limit, ct);
+        Remember(hits);
+        return JsonSerializer.Serialize(new { total = hits.Count, messages = hits.Select(Row) }, Json);
+    }
+
+    private async Task<string> ListAsync(string? folderName, bool unreadOnly, int limit, CancellationToken ct)
+    {
+        var folders = await _store.GetFoldersAsync(_account.Id, ct);
+        var folder = string.IsNullOrWhiteSpace(folderName)
+            ? folders.FirstOrDefault(f => f.Kind == FolderKind.Inbox)
+            : folders.FirstOrDefault(f => f.DisplayName.Equals(folderName, StringComparison.OrdinalIgnoreCase))
+              ?? folders.FirstOrDefault(f => f.DisplayName.Contains(folderName, StringComparison.OrdinalIgnoreCase));
+        if (folder is null) return JsonSerializer.Serialize(new { error = $"No folder named '{folderName}'. Use list_folders." });
+        var all = await _store.GetMessagesAsync(folder.Id, limit: unreadOnly ? 2000 : limit, ct: ct);
+        var page = (unreadOnly ? all.Where(m => !m.IsRead) : all).Take(limit).ToList();
+        foreach (var m in page) m.FolderName = folder.DisplayName;
+        Remember(page);
+        return JsonSerializer.Serialize(new { folder = folder.DisplayName, total_in_folder = folder.TotalCount, unread = folder.UnreadCount, messages = page.Select(Row) }, Json);
+    }
+
+    private async Task<string> GetAsync(JsonElement input, CancellationToken ct)
+    {
+        if (!(input.ValueKind == JsonValueKind.Object && input.TryGetProperty("id", out var idEl) && idEl.TryGetInt64(out var id)))
+            return JsonSerializer.Serialize(new { error = "id is required" });
+        var message = await _store.GetMessageAsync(id, ct);
+        if (message is null) return JsonSerializer.Serialize(new { error = "No message with that id." });
+        var folder = await _store.GetFolderAsync(message.FolderId, ct);
+        if (folder is null || folder.AccountId != _account.Id) return JsonSerializer.Serialize(new { error = "No message with that id." });
+        message.FolderName = folder.DisplayName;
+        Remember([message]);
+
+        var body = await _store.GetBodyAsync(message.Id, ct);
+        if (body is null && _sync is not null)
+        {
+            try { body = await _sync.FetchBodyAsync(_account, message, ct); }
+            catch (Exception ex) { return JsonSerializer.Serialize(new { id = message.Id, error = $"Body could not be downloaded: {ex.Message}", preview = message.Snippet }); }
+        }
+        var text = ComposeBuilder.BodyText(body);
+        if (text.Length > MaxBodyChars) text = text[..MaxBodyChars] + "\n[truncated]";
+        return JsonSerializer.Serialize(new
+        {
+            id = message.Id, folder = message.FolderName, from = message.FromDisplay, address = message.FromAddress, to = message.ToAddresses,
+            subject = message.Subject, date = message.Date.ToString("yyyy-MM-dd HH:mm"), has_attachments = message.HasAttachments,
+            body = string.IsNullOrWhiteSpace(text) ? "(no cached text)" : text,
+        }, Json);
+    }
+
+    private async Task<string> FoldersAsync(CancellationToken ct)
+    {
+        var folders = await _store.GetFoldersAsync(_account.Id, ct);
+        return JsonSerializer.Serialize(folders.Select(f => new { name = f.DisplayName, kind = f.Kind.ToString(), total = f.TotalCount, unread = f.UnreadCount }), Json);
+    }
+
+    private void Remember(IEnumerable<MessageSummary> messages)
+    {
+        foreach (var m in messages)
+            if (Consulted.All(c => c.Id != m.Id)) Consulted.Add(m);
+    }
+
+    private static object Row(MessageSummary m) => new
+    {
+        id = m.Id, folder = m.FolderName, from = m.FromDisplay, address = m.FromAddress, subject = m.Subject,
+        date = m.Date.ToString("yyyy-MM-dd HH:mm"), read = m.IsRead, flagged = m.IsFlagged, attachments = m.HasAttachments,
+        preview = m.Snippet.Length > 160 ? m.Snippet[..160] + "…" : m.Snippet,
+    };
+
+    private static string? Str(JsonElement e, string name)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    private static int Int(JsonElement e, string name, int fallback, int max)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.TryGetInt32(out var i) ? Math.Clamp(i, 1, max) : fallback;
+    private static bool Bool(JsonElement e, string name)
+        => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+}
+
+public sealed class AssistantAnswer
+{
+    public string Text { get; init; } = "";
+    /// <summary>Messages the model opened or searched up while answering, for the user to click.</summary>
+    public IReadOnlyList<MessageSummary> Sources { get; init; } = [];
+    public string ModelNote { get; init; } = "";
+}
+
+/// <summary>"Ask your mailbox": natural-language questions answered by searching and reading mail through read-only tools.</summary>
+public sealed class MailboxAssistant
+{
+    private readonly IMailStore _store;
+    private readonly IMailSync? _sync;
+
+    public MailboxAssistant(IMailStore store, IMailSync? sync)
+    {
+        _store = store;
+        _sync = sync;
+    }
+
+    public static string System(string userName, string userEmail) => $"""
+        You are the mailbox assistant inside {userName}'s email client ({userEmail}). Today is {DateTime.Now:dddd d MMMM yyyy}.
+        Answer questions about their mail by using the tools: search first, read a message with get_message only when the
+        preview is not enough, and keep tool calls few. Answer in plain text, briefly and specifically, quoting dates,
+        amounts and names from the mail. Mention which message something came from by sender and subject so the person
+        can find it. If the mail does not contain the answer, say so rather than guessing. You cannot send, move or change
+        anything; if asked to, explain that and suggest what the person can do in the client.
+        """;
+
+    public async Task<AssistantAnswer> AskAsync(IModelClient client, Account account, IReadOnlyList<ChatTurn> history, string question, CancellationToken ct = default)
+    {
+        var toolbox = new MailboxToolbox(_store, _sync, account);
+        var result = await client.RunToolsAsync(System(account.Name, account.Email), history, question, MailboxToolbox.Tools, (n, i) => toolbox.ExecuteAsync(n, i, ct), maxTurns: 15, ct);
+        return new AssistantAnswer
+        {
+            Text = string.IsNullOrWhiteSpace(result.Text) ? "I could not find an answer in your mail." : result.Text,
+            Sources = toolbox.Consulted.Take(8).ToList(),
+            ModelNote = $"{client.Name}, {result.InputTokens:N0} in / {result.OutputTokens:N0} out",
+        };
+    }
+}
