@@ -245,7 +245,7 @@ public sealed class ImapMailSync : IMailSync
     {
         using var client = await ConnectAsync(account, null, ct);
         var top = client.GetFolder(client.PersonalNamespaces[0]);
-        var created = await top.CreateAsync(name, true, ct);
+        var created = await top.CreateAsync(name, true, ct) ?? throw new InvalidOperationException($"Server did not return the created folder '{name}'.");
         try { await created.SubscribeAsync(ct); } catch { /* some servers reject SUBSCRIBE; harmless */ }
         await client.DisconnectAsync(true, ct);
 

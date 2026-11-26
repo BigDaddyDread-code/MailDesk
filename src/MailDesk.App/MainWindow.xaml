@@ -37,6 +37,12 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource TopBarPrimaryButtonStyle}" Command="{Binding ComposeNewCommand}" Margin="0,0,6,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE70F;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="New message" />
+                            </StackPanel>
+                        </Button>
                         <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding AddAccountCommand}" Margin="0,0,6,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
@@ -49,7 +55,7 @@
                                 <TextBlock Text="Sync" />
                             </StackPanel>
                         </Button>
-                        <Button Style="{StaticResource TopBarPrimaryButtonStyle}" Command="{Binding RunTriageCommand}" Margin="0,0,6,0">
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding RunTriageCommand}" Margin="0,0,6,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE945;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
                                 <TextBlock Text="Tidy with agent" />
@@ -214,7 +220,24 @@
                 </Grid.RowDefinitions>
                 <Border Padding="20,14" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1"
                         Visibility="{Binding SelectedMessage, Converter={StaticResource NullToVisibility}}">
-                    <Grid DataContext="{Binding SelectedMessage}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top" Margin="12,0,0,0">
+                            <Button Command="{Binding ReplyCommand}" ToolTip="Reply" Background="Transparent" BorderThickness="0" Padding="8,4">
+                                <TextBlock Text="&#xE97A;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                            </Button>
+                            <Button Command="{Binding ReplyAllCommand}" ToolTip="Reply all" Background="Transparent" BorderThickness="0" Padding="8,4">
+                                <TextBlock Text="&#xE8C2;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                            </Button>
+                            <Button Command="{Binding ForwardCommand}" ToolTip="Forward" Background="Transparent" BorderThickness="0" Padding="8,4">
+                                <TextBlock Text="&#xE8BE;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                            </Button>
+                        </StackPanel>
+                        <Grid Grid.ColumnSpan="2" DataContext="{Binding SelectedMessage}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -235,6 +258,7 @@
                                 <Run Text="   " /><Run Text="{Binding Date, Mode=OneWay, StringFormat='{}{0:ddd d MMM yyyy HH:mm}'}" />
                             </TextBlock>
                         </StackPanel>
+                        </Grid>
                     </Grid>
                 </Border>
                 <wv2:WebView2 x:Name="Reader" Grid.Row="1" DefaultBackgroundColor="White" />

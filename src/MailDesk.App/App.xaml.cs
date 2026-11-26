@@ -32,6 +32,7 @@ public partial class App : Application
         services.AddSingleton<IMailStore>(new SqliteMailStore(Path.Combine(dataDir, "maildesk.db")));
         services.AddSingleton<ICredentialProtector, DpapiCredentialProtector>();
         services.AddSingleton<IMailSync, ImapMailSync>();
+        services.AddSingleton<IMailSender, MailKitSender>();
         services.AddSingleton<IAgentService, HeuristicTriageAgent>();
         services.AddSingleton<ProposalApplier>();
         services.AddSingleton<MailDesk.Core.Rules.RuleRunner>();

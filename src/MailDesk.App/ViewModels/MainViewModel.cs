@@ -54,6 +54,47 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised by the view to show the rules window.</summary>
     public Func<Task>? RequestRulesWindow { get; set; }
 
+    /// <summary>Raised by the view to open a compose window. Returns a status line describing what happened, or null.</summary>
+    public Func<Account, OutgoingMessage, Task<string?>>? RequestCompose { get; set; }
+
+    // ---------------- Compose ----------------
+
+    [RelayCommand]
+    private Task ComposeNewAsync() => OpenComposeAsync(new OutgoingMessage());
+
+    [RelayCommand]
+    private Task ReplyAsync() => ReplyCoreAsync(replyAll: false);
+
+    [RelayCommand]
+    private Task ReplyAllAsync() => ReplyCoreAsync(replyAll: true);
+
+    [RelayCommand]
+    private async Task ForwardAsync()
+    {
+        if (SelectedMessage is null || SelectedFolder is null) return;
+        var body = await _store.GetBodyAsync(SelectedMessage.Id);
+        await OpenComposeAsync(Core.Text.ComposeBuilder.Forward(SelectedMessage, body));
+    }
+
+    private async Task ReplyCoreAsync(bool replyAll)
+    {
+        if (SelectedMessage is null || SelectedFolder is null) return;
+        var body = await _store.GetBodyAsync(SelectedMessage.Id);
+        await OpenComposeAsync(Core.Text.ComposeBuilder.Reply(SelectedMessage, body, SelectedFolder.Account.Email, replyAll));
+    }
+
+    private async Task OpenComposeAsync(OutgoingMessage seed)
+    {
+        var account = CurrentAccount;
+        if (RequestCompose is null || account is null) { StatusText = "Add an account first."; return; }
+        var outcome = await RequestCompose(account, seed);
+        if (outcome is null) return;
+        StatusText = outcome;
+        // A sent or drafted message shows up in Sent or Drafts once that folder syncs.
+        if (SelectedFolder is { Kind: FolderKind.Sent or FolderKind.Drafts })
+            await RunBusyAsync($"Refreshing {SelectedFolder.DisplayName}...", () => SyncFolderAsync(SelectedFolder));
+    }
+
     private Account? CurrentAccount => SelectedFolder?.Account ?? Accounts.FirstOrDefault();
 
     public async Task LoadAsync()

@@ -15,16 +15,19 @@ public partial class MainWindow : FluentWindow
     private readonly MainViewModel _vm;
     private readonly IMailSync _sync;
     private readonly ICredentialProtector _protector;
+    private readonly IMailSender _sender;
     private bool _readerReady;
 
-    public MainWindow(MainViewModel vm, IMailSync sync, ICredentialProtector protector)
+    public MainWindow(MainViewModel vm, IMailSync sync, ICredentialProtector protector, IMailSender sender)
     {
         _vm = vm;
         _sync = sync;
         _protector = protector;
+        _sender = sender;
         InitializeComponent();
         DataContext = vm;
         vm.RequestAccountDialog = ShowAccountDialogAsync;
+        vm.RequestCompose = ShowComposeAsync;
         vm.RequestRuleEditor = ShowRuleEditorAsync;
         vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;
@@ -98,5 +101,12 @@ public partial class MainWindow : FluentWindow
     {
         new RulesWindow(_vm) { Owner = this }.ShowDialog();
         return Task.CompletedTask;
+    }
+
+    private Task<string?> ShowComposeAsync(Account account, OutgoingMessage seed)
+    {
+        var window = new ComposeWindow(new ComposeViewModel(_sender, account, seed)) { Owner = this };
+        window.ShowDialog();
+        return Task.FromResult(window.Outcome);
     }
 }

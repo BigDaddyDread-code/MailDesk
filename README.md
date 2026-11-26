@@ -54,6 +54,17 @@ move to a folder (created on first use), move to Trash, mark read, or flag. The 
 
 A rule with no conditions never matches, so a half-finished rule cannot move mail.
 
+## Compose, reply, forward
+
+**New message** in the top bar opens the compose window: To, Cc/Bcc, subject, plain-text body, file attachments.
+The reader header has Reply, Reply all and Forward. Replies quote the original, set In-Reply-To and References
+so threads stay intact, and Reply all copies the other recipients minus you and the sender. Forward includes the
+original headers above the quoted body. Attachments from the original are not forwarded yet.
+
+Sending goes over SMTP (STARTTLS on 587 by default, implicit TLS on 465) with the account's credentials, then a copy
+is appended to the Sent folder. **Save draft** appends to the Drafts folder without sending. Messages go out as
+text plus a minimal HTML alternative so other clients keep the line breaks.
+
 ## Design rules
 
 - The UI reads only from the local store. The sync layer is the only thing that talks to the server.

@@ -13,6 +13,7 @@
 //   7. Run the heuristic triage agent          (proposes only, applies nothing)
 //   8. Create a rule for the newest sender, run rules on the Inbox, confirm the matching
 //      messages landed in "MailDesk Smoke Rules", move them back, delete rule and folder
+//   9. Sign in to SMTP (no send), save a draft to Drafts, confirm it synced, move it to Trash
 //
 // Usage: dotnet run --project tools/MailDesk.Smoke [path-to-maildesk.db]
 
@@ -162,6 +163,27 @@ await Step("8. Rule: match newest sender, run on Inbox, verify move, restore", a
         if (created is not null) await sync.DeleteFolderAsync(account, created);
         Console.WriteLine("   rule and folder removed");
     }
+});
+
+await Step("9. SMTP sign-in and save a draft (nothing is sent)", async () =>
+{
+    var sender = new MailKitSender(store, new DpapiCredentialProtector());
+    await sender.TestSmtpAsync(account);
+    Console.WriteLine($"   SMTP {account.SmtpHost}:{account.SmtpPort} authenticated");
+
+    var drafts = (await store.GetFoldersAsync(account.Id)).FirstOrDefault(f => f.Kind == FolderKind.Drafts);
+    Require(drafts is not null, "no Drafts folder");
+    var messageId = await sender.SaveDraftAsync(account, new OutgoingMessage
+    {
+        To = account.Email, Subject = "MailDesk smoke draft", TextBody = "This draft was created by the MailDesk smoke test and can be deleted.",
+    });
+    var landed = await sync.SyncFolderAsync(account, drafts!);
+    var draft = landed.FirstOrDefault(m => m.MessageId == messageId) ?? (await store.GetMessagesAsync(drafts!.Id)).FirstOrDefault(m => m.MessageId == messageId);
+    Require(draft is not null, "draft did not appear in Drafts");
+    Console.WriteLine($"   draft saved as uid {draft!.Uid} in {drafts!.DisplayName}");
+
+    var trash = (await store.GetFoldersAsync(account.Id)).FirstOrDefault(f => f.Kind == FolderKind.Trash);
+    if (trash is not null) { await sync.MoveAsync(account, [draft], trash); Console.WriteLine("   draft moved to Trash"); }
 });
 
 Console.WriteLine();
