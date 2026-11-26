@@ -59,6 +59,8 @@ A rule with no conditions never matches, so a half-finished rule cannot move mai
 **Tidy with agent** runs whichever agent is selected in **AI settings** (the gear icon):
 
 - **Local rules**: the heuristic agent, no network, no cost.
+- **OpenAI**: `OpenAITriageAgent` uses the same toolbox and prompt through Chat Completions function calling
+  (default model `gpt-5`; key from AI settings or `OPENAI_API_KEY`).
 - **Claude**: `ClaudeTriageAgent` calls the Anthropic API (default model `claude-opus-5-5`) with a small tool set
   over the local cache: `list_folders`, `get_sender_stats`, `list_messages` (filterable by sender or subject),
   `propose_move`, `propose_rules`, `finish`. The model can only propose; every proposal lands in the same review

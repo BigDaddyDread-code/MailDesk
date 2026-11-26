@@ -35,6 +35,7 @@ public partial class App : Application
         services.AddSingleton<IMailSender, MailKitSender>();
         services.AddSingleton<HeuristicTriageAgent>();
         services.AddSingleton<ClaudeTriageAgent>();
+        services.AddSingleton<OpenAITriageAgent>();
         services.AddSingleton<IAgentService, SwitchingAgent>();
         services.AddSingleton<ProposalApplier>();
         services.AddSingleton<MailDesk.Core.Rules.RuleRunner>();

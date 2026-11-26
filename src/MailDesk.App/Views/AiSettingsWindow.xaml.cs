@@ -24,37 +24,45 @@ public partial class AiSettingsWindow : FluentWindow
     private async Task LoadAsync()
     {
         _settings = await AgentSettings.LoadAsync(_store);
-        LocalRadio.IsChecked = !_settings.UseClaude;
-        ClaudeRadio.IsChecked = _settings.UseClaude;
-        ModelBox.Text = _settings.Model;
+        LocalRadio.IsChecked = _settings.Provider == AgentProvider.Heuristic;
+        ClaudeRadio.IsChecked = _settings.Provider == AgentProvider.Claude;
+        OpenAIRadio.IsChecked = _settings.Provider == AgentProvider.OpenAI;
+        ClaudeModelBox.Text = _settings.ClaudeModel;
+        OpenAIModelBox.Text = _settings.OpenAIModel;
         PreviewsBox.IsChecked = _settings.SharePreviews;
-        var env = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
-        KeyStatus.Text = _settings.HasApiKey ? "A key is saved." : env ? "No saved key; ANTHROPIC_API_KEY from the environment will be used." : "No key saved.";
+        ClaudeKeyStatus.Text = KeyStatus(_settings.HasAnthropicKey, "ANTHROPIC_API_KEY");
+        OpenAIKeyStatus.Text = KeyStatus(_settings.HasOpenAIKey, "OPENAI_API_KEY");
     }
 
-    private async Task<string?> EffectiveKeyAsync()
+    private static string KeyStatus(bool saved, string envVar)
     {
-        var typed = KeyBox.Password;
-        if (!string.IsNullOrWhiteSpace(typed)) return typed.Trim();
-        return await AgentSettings.LoadApiKeyAsync(_store, _protector);
+        if (saved) return "A key is saved.";
+        var env = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(envVar));
+        return env ? $"No saved key; {envVar} from the environment will be used." : "No key saved.";
     }
 
-    private async void Test_Click(object sender, RoutedEventArgs e)
+    private async void ClaudeTest_Click(object sender, RoutedEventArgs e)
+        => await TestAsync(ClaudeTestButton, ClaudeKeyBox.Password, AgentSettings.KeyAnthropicApiKey, "ANTHROPIC_API_KEY", ClaudeModelBox.Text, ClaudeTriageAgent.TestAsync);
+
+    private async void OpenAITest_Click(object sender, RoutedEventArgs e)
+        => await TestAsync(OpenAITestButton, OpenAIKeyBox.Password, AgentSettings.KeyOpenAIApiKey, "OPENAI_API_KEY", OpenAIModelBox.Text, OpenAITriageAgent.TestAsync);
+
+    private async Task TestAsync(System.Windows.Controls.Button button, string typedKey, string settingKey, string envVar, string model, Func<string, string, CancellationToken, Task> test)
     {
-        TestButton.IsEnabled = false;
+        button.IsEnabled = false;
         Show("Testing...", muted: true);
         try
         {
-            var key = await EffectiveKeyAsync();
+            var key = !string.IsNullOrWhiteSpace(typedKey) ? typedKey.Trim() : await AgentSettings.LoadApiKeyAsync(_store, _protector, settingKey, envVar);
             if (key is null) { Show("Enter an API key first.", error: true); return; }
-            await ClaudeTriageAgent.TestAsync(key, ModelBox.Text.Trim());
-            Show($"Key works and model '{ModelBox.Text.Trim()}' is available.");
+            await test(key, model.Trim(), CancellationToken.None);
+            Show($"Key works and model '{model.Trim()}' is available.");
         }
         catch (Exception ex)
         {
             Show($"Test failed: {ex.Message}", error: true);
         }
-        finally { TestButton.IsEnabled = true; }
+        finally { button.IsEnabled = true; }
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
@@ -62,12 +70,16 @@ public partial class AiSettingsWindow : FluentWindow
         SaveButton.IsEnabled = false;
         try
         {
-            _settings.UseClaude = ClaudeRadio.IsChecked == true;
-            _settings.Model = string.IsNullOrWhiteSpace(ModelBox.Text) ? AgentSettings.DefaultModel : ModelBox.Text.Trim();
+            _settings.Provider = ClaudeRadio.IsChecked == true ? AgentProvider.Claude
+                : OpenAIRadio.IsChecked == true ? AgentProvider.OpenAI : AgentProvider.Heuristic;
+            _settings.ClaudeModel = ClaudeModelBox.Text;
+            _settings.OpenAIModel = OpenAIModelBox.Text;
             _settings.SharePreviews = PreviewsBox.IsChecked == true;
             await AgentSettings.SaveAsync(_store, _settings);
-            if (!string.IsNullOrWhiteSpace(KeyBox.Password))
-                await AgentSettings.SaveApiKeyAsync(_store, _protector, KeyBox.Password);
+            if (!string.IsNullOrWhiteSpace(ClaudeKeyBox.Password))
+                await AgentSettings.SaveApiKeyAsync(_store, _protector, AgentSettings.KeyAnthropicApiKey, ClaudeKeyBox.Password);
+            if (!string.IsNullOrWhiteSpace(OpenAIKeyBox.Password))
+                await AgentSettings.SaveApiKeyAsync(_store, _protector, AgentSettings.KeyOpenAIApiKey, OpenAIKeyBox.Password);
             DialogResult = true;
             Close();
         }
