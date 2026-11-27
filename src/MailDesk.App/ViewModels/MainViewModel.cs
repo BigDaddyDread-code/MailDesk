@@ -625,16 +625,32 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task MoveToTrashAsync(MessageSummary? message)
+    private Task MoveToTrashAsync(MessageSummary? message) => TrashMessagesAsync(message is null ? [] : [message]);
+
+    /// <summary>
+    /// Move one or more messages to the account's Trash folder (never a permanent delete). Afterwards the message that
+    /// followed the selection is selected so Delete can be pressed repeatedly to work down the list.
+    /// </summary>
+    public async Task TrashMessagesAsync(IReadOnlyList<MessageSummary> messages)
     {
-        if (message is null || SelectedFolder is null) return;
+        if (messages.Count == 0 || SelectedFolder is null) return;
         var trash = Folders.FirstOrDefault(f => f.Account.Id == SelectedFolder.Account.Id && f.Kind == FolderKind.Trash);
         if (trash is null) { StatusText = "No Trash folder found for this account."; return; }
-        await RunBusyAsync("Moving to Trash...", async () =>
+
+        var toMove = messages.Where(m => m.FolderId != trash.Folder.Id).ToList();
+        if (toMove.Count == 0)
         {
-            await _sync.MoveAsync(SelectedFolder.Account, [message], trash.Folder);
-            Messages.Remove(message);
-        });
+            StatusText = messages.Count == 1 ? "That message is already in Trash." : "Those messages are already in Trash.";
+            return;
+        }
+
+        var positions = toMove.Select(Messages.IndexOf).Where(i => i >= 0).ToList();
+        var nextIndex = positions.Count == 0 ? -1 : positions.Min();
+
+        await MoveMessagesAsync(toMove, trash);
+
+        if (nextIndex >= 0 && Messages.Count > 0 && (SelectedMessage is null || !Messages.Contains(SelectedMessage)))
+            SelectedMessage = Messages[Math.Min(nextIndex, Messages.Count - 1)];
     }
 
     /// <summary>Whether a drag of messages may land on this folder: same account, and a folder that can hold moved mail.</summary>

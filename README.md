@@ -106,10 +106,12 @@ hide done ones. Overdue tasks are marked. A task made from a message keeps a lin
   proposal adds the tasks and nothing else.
 - Type one into the Tasks window.
 
-## Drag and drop
+## Selecting, moving and deleting
 
-Drag one or more messages from the list onto a folder in the sidebar to move them. Multi-select with Ctrl or Shift. The
-folder under the pointer highlights green when it can take the drop; Drafts and other accounts' folders refuse it.
+Multi-select messages with Ctrl or Shift. Drag the selection onto a folder in the sidebar to move it; the folder under the
+pointer highlights green when it can take the drop, and Drafts and other accounts' folders refuse it. **Delete**, the bin
+button in the reader header, or right-click **Move to Trash** sends every selected message to Trash (never a permanent
+delete) and selects the next message so you can keep going. Right-clicking a row outside the selection acts on that row alone.
 
 ## Summarise and ask
 

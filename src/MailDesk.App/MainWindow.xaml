@@ -203,11 +203,13 @@
                               BorderThickness="0" Background="Transparent" ItemContainerStyle="{StaticResource MessageRowStyle}"
                               VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                              PreviewMouseLeftButtonDown="MessageList_PreviewMouseLeftButtonDown" PreviewMouseMove="MessageList_PreviewMouseMove">
+                              PreviewMouseLeftButtonDown="MessageList_PreviewMouseLeftButtonDown" PreviewMouseMove="MessageList_PreviewMouseMove"
+                              KeyDown="MessageList_KeyDown">
                         <ListView.Resources>
                             <ContextMenu x:Key="RowMenu">
                                 <MenuItem Header="Toggle flag" Command="{Binding PlacementTarget.Tag.ToggleFlagCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
-                                <MenuItem Header="Move to Trash" Command="{Binding PlacementTarget.Tag.MoveToTrashCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <!-- Acts on the whole selection when the clicked row is part of it; see TrashMenu_Click. -->
+                                <MenuItem Header="Move to Trash" InputGestureText="Del" Click="TrashMenu_Click" />
                                 <Separator />
                                 <MenuItem Header="Create task from message" Command="{Binding PlacementTarget.Tag.CreateTaskFromMessageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                 <MenuItem Header="Create rule from sender..." Command="{Binding PlacementTarget.Tag.CreateRuleFromSenderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
@@ -290,6 +292,9 @@
                             </Button>
                             <Button Command="{Binding ForwardCommand}" ToolTip="Forward" Background="Transparent" BorderThickness="0" Padding="8,4">
                                 <TextBlock Text="&#xE8BE;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                            </Button>
+                            <Button Click="TrashButton_Click" ToolTip="Move to Trash (Del). Moves every selected message." Background="Transparent" BorderThickness="0" Padding="8,4" Margin="4,0,0,0">
+                                <TextBlock Text="&#xE74D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
                             </Button>
                         </StackPanel>
                         <Grid Grid.ColumnSpan="2" DataContext="{Binding SelectedMessage}">

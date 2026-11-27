@@ -99,6 +99,32 @@ public partial class MainWindow : FluentWindow
             _vm.SearchCommand.Execute(null);
     }
 
+    // ---------------- Trash the selection ----------------
+
+    /// <summary>The current multi-selection, or just <paramref name="clicked"/> when it was right-clicked outside the selection.</summary>
+    private IReadOnlyList<MessageSummary> SelectionIncluding(MessageSummary? clicked)
+    {
+        var selected = MessageList.SelectedItems.Cast<MessageSummary>().ToList();
+        if (clicked is null) return selected;
+        return selected.Contains(clicked) ? selected : [clicked];
+    }
+
+    private async void MessageList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete || Keyboard.Modifiers != ModifierKeys.None) return;
+        e.Handled = true;
+        await _vm.TrashMessagesAsync(SelectionIncluding(null));
+    }
+
+    private async void TrashMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var clicked = (sender as System.Windows.Controls.MenuItem)?.DataContext as MessageSummary;
+        await _vm.TrashMessagesAsync(SelectionIncluding(clicked));
+    }
+
+    private async void TrashButton_Click(object sender, RoutedEventArgs e) =>
+        await _vm.TrashMessagesAsync(SelectionIncluding(_vm.SelectedMessage));
+
     // ---------------- Drag messages onto folders ----------------
 
     private const string MessageDragFormat = "MailDesk.Messages";
