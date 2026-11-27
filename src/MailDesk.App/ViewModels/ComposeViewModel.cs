@@ -70,18 +70,7 @@ public sealed partial class ComposeViewModel : ObservableObject
     public bool HasQuotedOriginal => QuoteStart(Body) >= 0;
 
     /// <summary>Index where the quoted original begins ("On ... wrote:" or the forwarded-message header), or -1.</summary>
-    private static int QuoteStart(string body)
-    {
-        var lines = body.Replace("\r\n", "\n").Split('\n');
-        var pos = 0;
-        foreach (var line in lines)
-        {
-            var t = line.TrimStart();
-            if ((t.StartsWith("On ") && t.TrimEnd().EndsWith("wrote:")) || t.StartsWith("---------- Forwarded message")) return pos;
-            pos += line.Length + 1;
-        }
-        return -1;
-    }
+    private static int QuoteStart(string body) => Core.Text.ComposeBuilder.QuoteStart(body);
 
     /// <summary>
     /// Asks the configured model for a body. The quoted original and anything already typed go to the model as context;

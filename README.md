@@ -95,6 +95,29 @@ decline in their own client. Events you organise have an **Edit** button in the 
 number and can resend the updated invitation. Invitations from other people are responded to from the message they
 arrived in, not edited here.
 
+## Conversations and the timeline
+
+Every message gets a thread key when it is cached: the first Message-ID in `References`, else `In-Reply-To`, else its own
+Message-ID. Two fix-ups make real mail hang together: a key that points at a cached message which already belongs to another
+thread is chased to that thread (clients that truncate `References`), and a `Re:` with no thread headers at all joins the
+earliest message in the account with the same normalised subject. Keys are plain indexed columns, so threading costs
+nothing at read time.
+
+- **Conversations**, the toggle at the top of the message list, shows one row per thread: the newest message, with a count
+  badge for how many messages the conversation holds across the account (Trash and Junk excluded) and bold when any of them
+  is unread. Off, the list is one row per message and the badge still shows on messages that belong to a thread. The
+  setting is remembered.
+- **The timeline** appears above the open message whenever its conversation has more than one message: every message in
+  it across folders (your replies from Sent included), oldest first, each with who, which folder, a one-line preview, when,
+  and an unread dot. The open message is highlighted; click another to read it. Clicking one that is not in the current list
+  (your own reply in Sent, say) shows it in the reader without changing the list or its selection.
+- **Waiting** uses thread keys as its first test for "has been answered", ahead of the header and subject matching.
+- **Ask your mailbox** gets `get_conversation`: the whole exchange behind a message with each message's own text (quoted
+  replies stripped), so "what did we agree with the builder?" reads one timeline instead of five messages.
+
+Operations on a conversation row act on that one message, not the whole thread. Deleting or moving a thread at once is
+not built yet.
+
 ## Views: Priority, Waiting, Newsletters, Notifications
 
 The sidebar starts with four **Views** built from the local cache, one set per account, above the server folders:
@@ -216,10 +239,10 @@ act on while staying in control. Measured against five workspaces, this is the s
 
 | Workspace | Question | Have | Missing |
 |---|---|---|---|
-| Inbox | What arrived and needs attention? | Priority view, local classification, rules, drag and drop, multi-select delete, remote-image control | Unified inbox across accounts, threading, snooze, keyboard command palette |
+| Inbox | What arrived and needs attention? | Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Unified inbox across accounts, snooze, keyboard command palette, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
 | Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant | Reminders when a wait passes a threshold, "nudge" drafts |
-| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, Ask-your-mailbox with sources, Summarise | Semantic search, conversation timelines, decisions and commitments extracted per thread, saved searches |
+| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, `get_conversation` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, decisions and commitments extracted per thread with links to the source message, saved searches |
 | Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
 
 Everything the AI does is proposal-only: it never sends, deletes or changes a record on its own, and the review pane shows
@@ -227,8 +250,8 @@ what it wants to do before anything happens. That rule holds for every item in t
 
 Engineering next steps, in order:
 
-1. Threading and a conversation timeline per subject key, so Waiting and Knowledge can show the whole exchange.
-2. Unified inbox and per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
+1. Unified inbox and per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
+2. Decisions, commitments and open questions extracted per conversation, each linked to its source message.
 3. Saved searches as sidebar views, built on the search operators above.
 4. Keyboard shortcuts and a command palette.
 5. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.

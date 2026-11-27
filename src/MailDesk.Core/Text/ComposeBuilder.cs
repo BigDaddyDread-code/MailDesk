@@ -52,6 +52,30 @@ public static class ComposeBuilder
         return HtmlText.ToPlainText(body.HtmlBody ?? "");
     }
 
+    /// <summary>Index where a quoted original begins ("On ... wrote:", the forwarded-message header, or a run of "&gt;" lines), or -1.</summary>
+    public static int QuoteStart(string body)
+    {
+        var lines = body.Replace("\r\n", "\n").Split('\n');
+        var pos = 0;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var t = lines[i].TrimStart();
+            if ((t.StartsWith("On ") && t.TrimEnd().EndsWith("wrote:")) || t.StartsWith("---------- Forwarded message") || t.StartsWith("-----Original Message-----"))
+                return pos;
+            if (t.StartsWith('>') && i + 1 < lines.Length && lines[i + 1].TrimStart().StartsWith('>')) return pos;
+            pos += lines[i].Length + 1;
+        }
+        return -1;
+    }
+
+    /// <summary>The text above any quoted original: what this message itself says.</summary>
+    public static string StripQuotedReply(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+        var at = QuoteStart(text);
+        return (at < 0 ? text : text[..at]).Trim();
+    }
+
     public static string Quote(string text)
     {
         if (string.IsNullOrEmpty(text)) return "> ";

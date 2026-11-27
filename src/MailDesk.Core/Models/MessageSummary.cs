@@ -27,6 +27,17 @@ public sealed class MessageSummary
     public MessageCategory Category { get; set; }
     /// <summary>Subject without Re:/Fwd: prefixes, lower-cased, for matching replies to originals. Filled in by the store when empty.</summary>
     public string SubjectKey { get; set; } = "";
+    /// <summary>
+    /// Conversation key, assigned by the store: the first Message-ID in References, else In-Reply-To, else the message's own
+    /// Message-ID. A Re: with no thread headers joins the earliest message with the same subject key.
+    /// </summary>
+    public string ThreadKey { get; set; } = "";
+
+    /// <summary>Messages in this conversation across the account (Trash and Junk excluded). Filled by list queries; 0 when unknown.</summary>
+    public int ThreadCount { get; set; }
+    /// <summary>Unread messages in the conversation. Filled by list queries.</summary>
+    public int ThreadUnread { get; set; }
+    public string ThreadBadge => ThreadCount > 1 ? ThreadCount.ToString() : "";
 
     /// <summary>Display name of the containing folder. Filled by search results and views only; not a stored column.</summary>
     public string FolderName { get; set; } = "";

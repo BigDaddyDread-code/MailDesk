@@ -37,7 +37,18 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<MailRule> Rules { get; } = [];
 
     [ObservableProperty] private FolderItem? _selectedFolder;
+    /// <summary>The list selection. Normally also the message in the reader; see <see cref="ReaderMessage"/>.</summary>
     [ObservableProperty] private MessageSummary? _selectedMessage;
+    /// <summary>The message open in the reader. Follows the selection, or a conversation entry clicked in the timeline (which may live in another folder).</summary>
+    [ObservableProperty] private MessageSummary? _readerMessage;
+    /// <summary>One row per conversation in folder lists (newest message of each thread). Persisted as a setting.</summary>
+    [ObservableProperty] private bool _showConversations;
+    private bool _loadingSettings;
+
+    /// <summary>The conversation around <see cref="ReaderMessage"/>, oldest first, across folders.</summary>
+    public ObservableCollection<ThreadEntry> Thread { get; } = [];
+    [ObservableProperty] private bool _hasThread;
+    [ObservableProperty] private string _threadTitle = "";
     [ObservableProperty] private string _searchText = "";
     [ObservableProperty] private string _statusText = "Ready";
     [ObservableProperty] private bool _isBusy;
@@ -108,7 +119,9 @@ public sealed partial class MainViewModel : ObservableObject
             SelectedFolder = folder;
             await LoadMessagesAsync();
         }
-        SelectedMessage = Messages.FirstOrDefault(m => m.Id == messageId) ?? message;
+        var inList = Messages.FirstOrDefault(m => m.Id == messageId);
+        if (inList is not null) SelectedMessage = inList;
+        else ReaderMessage = message; // e.g. collapsed inside a conversation row: show it without disturbing the list
     }
 
     // ---------------- Calendar and invites ----------------
@@ -223,16 +236,16 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task ForwardAsync()
     {
-        if (SelectedMessage is null || SelectedFolder is null) return;
-        var body = await _store.GetBodyAsync(SelectedMessage.Id);
-        await OpenComposeAsync(Core.Text.ComposeBuilder.Forward(SelectedMessage, body));
+        if (ReaderMessage is null || SelectedFolder is null) return;
+        var body = await _store.GetBodyAsync(ReaderMessage.Id);
+        await OpenComposeAsync(Core.Text.ComposeBuilder.Forward(ReaderMessage, body));
     }
 
     private async Task ReplyCoreAsync(bool replyAll)
     {
-        if (SelectedMessage is null || SelectedFolder is null) return;
-        var body = await _store.GetBodyAsync(SelectedMessage.Id);
-        await OpenComposeAsync(Core.Text.ComposeBuilder.Reply(SelectedMessage, body, SelectedFolder.Account.Email, replyAll));
+        if (ReaderMessage is null || SelectedFolder is null) return;
+        var body = await _store.GetBodyAsync(ReaderMessage.Id);
+        await OpenComposeAsync(Core.Text.ComposeBuilder.Reply(ReaderMessage, body, SelectedFolder.Account.Email, replyAll));
     }
 
     private async Task OpenComposeAsync(OutgoingMessage seed)
@@ -263,6 +276,9 @@ public sealed partial class MainViewModel : ObservableObject
                 Views.Add(new FolderItem(a, v));
         }
         _ = RefreshViewCountsAsync();
+        _loadingSettings = true;
+        ShowConversations = await _store.GetSettingAsync(ConversationsKey) == "1";
+        _loadingSettings = false;
         SelectedFolder ??= Folders.FirstOrDefault(f => f.Kind == FolderKind.Inbox) ?? Folders.FirstOrDefault();
         var first = Accounts.FirstOrDefault();
         WorkspaceTitle = first?.Name ?? "MailDesk";
@@ -273,6 +289,15 @@ public sealed partial class MainViewModel : ObservableObject
     partial void OnSelectedFolderChanged(FolderItem? value)
     {
         _ = LoadMessagesAsync();
+    }
+
+    private const string ConversationsKey = "list.conversations";
+
+    partial void OnShowConversationsChanged(bool value)
+    {
+        if (_loadingSettings) return;
+        _ = _store.SetSettingAsync(ConversationsKey, value ? "1" : "0");
+        if (SelectedFolder is { IsView: false }) _ = LoadMessagesAsync();
     }
 
     private async Task LoadMessagesAsync()
@@ -308,12 +333,17 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
-        foreach (var m in await _store.GetMessagesAsync(SelectedFolder.Folder.Id))
+        var list = ShowConversations
+            ? await _store.GetThreadsAsync(SelectedFolder.Folder.Id)
+            : await _store.GetMessagesAsync(SelectedFolder.Folder.Id);
+        foreach (var m in list)
         {
             if (SelectedFolder.Kind == FolderKind.Sent) m.ShowRecipients = true;
             Messages.Add(m);
         }
-        ListSubtitle = $"{Messages.Count} messages, {SelectedFolder.UnreadCount} unread";
+        ListSubtitle = ShowConversations
+            ? $"{Messages.Count} conversation{(Messages.Count == 1 ? "" : "s")}, {SelectedFolder.UnreadCount} unread"
+            : $"{Messages.Count} messages, {SelectedFolder.UnreadCount} unread";
     }
 
     /// <summary>Badge counts for the views: unread for Priority, items for Waiting. Newsletters and Notifications stay quiet on purpose.</summary>
@@ -339,7 +369,42 @@ public sealed partial class MainViewModel : ObservableObject
 
     partial void OnSelectedMessageChanged(MessageSummary? value)
     {
+        // Clearing the list selection (folder change, reload) clears the reader; a null from a peeked message does not.
+        if (value is not null || ReaderMessage is null || Messages.Contains(ReaderMessage) || Messages.Count == 0)
+            ReaderMessage = value;
+    }
+
+    partial void OnReaderMessageChanged(MessageSummary? value)
+    {
         _ = ShowMessageAsync(value);
+    }
+
+    /// <summary>Show a message from the conversation timeline. Stays in the list when it is there; otherwise the reader shows it alone.</summary>
+    [RelayCommand]
+    private void OpenThreadEntry(ThreadEntry? entry)
+    {
+        if (entry is null || entry.IsCurrent) return;
+        var inList = Messages.FirstOrDefault(m => m.Id == entry.Message.Id);
+        if (inList is not null) SelectedMessage = inList;
+        else ReaderMessage = entry.Message;
+    }
+
+    private async Task LoadThreadAsync(MessageSummary message)
+    {
+        Thread.Clear();
+        HasThread = false;
+        if (SelectedFolder is null || string.IsNullOrEmpty(message.ThreadKey)) return;
+        var account = SelectedFolder.Account;
+        var rows = await _store.GetThreadAsync(account.Id, message.ThreadKey);
+        if (!ReferenceEquals(message, ReaderMessage) || rows.Count < 2) return;
+        foreach (var r in rows)
+            Thread.Add(new ThreadEntry(r, r.Id == message.Id, r.FromAddress.Equals(account.Email, StringComparison.OrdinalIgnoreCase)));
+        var mine = rows.Count(r => r.FromAddress.Equals(account.Email, StringComparison.OrdinalIgnoreCase));
+        var others = rows.Select(r => r.FromAddress.ToLowerInvariant()).Where(a => a != account.Email.ToLowerInvariant()).Distinct().Count();
+        var span = rows[^1].Date - rows[0].Date;
+        var spanText = span.TotalDays >= 1 ? $"over {Math.Max(1, (int)Math.Round(span.TotalDays))} day{((int)Math.Round(span.TotalDays) == 1 ? "" : "s")}" : "today";
+        ThreadTitle = $"Conversation: {rows.Count} messages {spanText}, {mine} from you, {others} other {(others == 1 ? "person" : "people")}";
+        HasThread = true;
     }
 
     private async Task ShowMessageAsync(MessageSummary? message)
@@ -348,6 +413,8 @@ public sealed partial class MainViewModel : ObservableObject
         {
             ReaderHtml = MailHtml.Empty();
             Insight = null;
+            Thread.Clear();
+            HasThread = false;
             return;
         }
         try
@@ -356,8 +423,9 @@ public sealed partial class MainViewModel : ObservableObject
             Invite = null;
             Insight = null;
             HasBlockedImages = false;
+            _ = LoadThreadAsync(message);
             var body = await _sync.FetchBodyAsync(SelectedFolder.Account, message);
-            if (!ReferenceEquals(message, SelectedMessage)) return; // user moved on while the body was downloading
+            if (!ReferenceEquals(message, ReaderMessage)) return; // user moved on while the body was downloading
             _currentBody = body;
             var allowImages = await IsSenderAllowedImagesAsync(message.FromAddress);
             RenderBody(allowImages);
@@ -367,7 +435,15 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 message.IsRead = true;
                 await _sync.SetFlagsAsync(SelectedFolder.Account, message, isRead: true);
-                SelectedFolder.UnreadCount = Math.Max(0, SelectedFolder.UnreadCount - 1);
+                var home = Folders.FirstOrDefault(f => f.Folder.Id == message.FolderId) ?? SelectedFolder;
+                home.UnreadCount = Math.Max(0, home.UnreadCount - 1);
+                if (SelectedFolder.IsView && !ReferenceEquals(home, SelectedFolder) && SelectedFolder.View != SmartView.Waiting)
+                    SelectedFolder.UnreadCount = Math.Max(0, SelectedFolder.UnreadCount - 1);
+                foreach (var t in Thread.Where(t => t.Message.Id == message.Id).ToList())
+                {
+                    var i = Thread.IndexOf(t);
+                    Thread[i] = new ThreadEntry(t.Message, t.IsCurrent, t.IsMine); // refresh the unread dot
+                }
             }
         }
         catch (Exception ex)
@@ -388,8 +464,8 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task SummariseAsync()
     {
-        if (SelectedMessage is null || SelectedFolder is null || RequestProtector is null) return;
-        var message = SelectedMessage;
+        if (ReaderMessage is null || SelectedFolder is null || RequestProtector is null) return;
+        var message = ReaderMessage;
         var account = SelectedFolder.Account;
         IsSummarising = true;
         try
@@ -399,7 +475,7 @@ public sealed partial class MainViewModel : ObservableObject
             var text = Core.Text.ComposeBuilder.BodyText(body);
             if (string.IsNullOrWhiteSpace(text)) text = message.Snippet;
             var insight = await InsightsService.AnalyzeAsync(client, account.Name, message, text);
-            if (ReferenceEquals(message, SelectedMessage)) Insight = insight;
+            if (ReferenceEquals(message, ReaderMessage)) Insight = insight;
             StatusText = $"Summarised with {insight.ModelNote}.";
         }
         catch (Exception ex) { StatusText = $"Summarise failed: {ex.Message}"; }
@@ -413,11 +489,11 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task AddActionTaskAsync(string? item)
     {
-        if (string.IsNullOrWhiteSpace(item) || SelectedMessage is null || SelectedFolder is null) return;
+        if (string.IsNullOrWhiteSpace(item) || ReaderMessage is null || SelectedFolder is null) return;
         await _store.UpsertTaskAsync(new TaskItem
         {
-            AccountId = SelectedFolder.Account.Id, Title = item.Trim(), Notes = $"From {SelectedMessage.FromDisplay}",
-            SourceMessageId = SelectedMessage.Id, SourceSubject = SelectedMessage.Subject,
+            AccountId = SelectedFolder.Account.Id, Title = item.Trim(), Notes = $"From {ReaderMessage.FromDisplay}",
+            SourceMessageId = ReaderMessage.Id, SourceSubject = ReaderMessage.Subject,
         });
         StatusText = $"Task added: {item.Trim()}";
     }
@@ -426,9 +502,9 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task UseSuggestedReplyAsync(string? text)
     {
-        if (string.IsNullOrWhiteSpace(text) || SelectedMessage is null || SelectedFolder is null) return;
-        var body = await _store.GetBodyAsync(SelectedMessage.Id);
-        var seed = Core.Text.ComposeBuilder.Reply(SelectedMessage, body, SelectedFolder.Account.Email, replyAll: false);
+        if (string.IsNullOrWhiteSpace(text) || ReaderMessage is null || SelectedFolder is null) return;
+        var body = await _store.GetBodyAsync(ReaderMessage.Id);
+        var seed = Core.Text.ComposeBuilder.Reply(ReaderMessage, body, SelectedFolder.Account.Email, replyAll: false);
         seed.TextBody = text.Trim() + seed.TextBody;
         await OpenComposeAsync(seed);
     }
@@ -487,7 +563,7 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task AddInsightEventAsync(EventSuggestion? suggestion)
     {
         if (suggestion is null) return;
-        var saved = await SaveSuggestedEventAsync(suggestion, SelectedMessage?.Id);
+        var saved = await SaveSuggestedEventAsync(suggestion, ReaderMessage?.Id);
         if (saved is not null && Insight is { } insight) { insight.Events.Remove(suggestion); OnPropertyChanged(nameof(Insight)); Insight = insight; }
     }
 
@@ -554,7 +630,7 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task AlwaysShowImagesFromSenderAsync()
     {
-        var from = SelectedMessage?.FromAddress;
+        var from = ReaderMessage?.FromAddress;
         if (string.IsNullOrWhiteSpace(from)) return;
         var allowed = await AllowedImageSendersAsync();
         allowed.Add(from);

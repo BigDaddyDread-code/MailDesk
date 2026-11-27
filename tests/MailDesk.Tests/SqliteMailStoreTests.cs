@@ -228,6 +228,54 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Thread_keys_group_replies_and_conversation_rows_collapse_them()
+    {
+        var (account, inbox) = await SeedAsync();
+        var sent = new MailFolder { AccountId = account.Id, FullName = "Sent", DisplayName = "Sent", Kind = FolderKind.Sent };
+        await _store.UpsertFolderAsync(sent);
+
+        await _store.UpsertMessagesAsync(
+        [
+            // A: original from Pat; B: my reply (References A); C: Pat's reply with a truncated References (only B);
+            // D: a "Re:" from Pat with no thread headers at all; E: an unrelated message; F: a lone message with no Message-ID.
+            new MessageSummary { FolderId = inbox.Id, Uid = 1, MessageId = "<a@pat>", Subject = "Deck quote", FromAddress = "pat@trade.test", DateUtcMs = 1000 },
+            new MessageSummary { FolderId = sent.Id, Uid = 1, MessageId = "<b@me>", Subject = "Re: Deck quote", FromAddress = "t@example.com", ToAddresses = "pat@trade.test", InReplyTo = "<a@pat>", ReferencesHeader = "<a@pat>", DateUtcMs = 2000 },
+            new MessageSummary { FolderId = inbox.Id, Uid = 2, MessageId = "<c@pat>", Subject = "Re: Deck quote", FromAddress = "pat@trade.test", InReplyTo = "<b@me>", ReferencesHeader = "<b@me>", DateUtcMs = 3000 },
+            new MessageSummary { FolderId = inbox.Id, Uid = 3, MessageId = "<d@pat>", Subject = "RE: Deck quote", FromAddress = "pat@trade.test", DateUtcMs = 4000 },
+            new MessageSummary { FolderId = inbox.Id, Uid = 4, MessageId = "<e@x>", Subject = "Rates notice", FromAddress = "rates@council.test", DateUtcMs = 2500 },
+            new MessageSummary { FolderId = inbox.Id, Uid = 5, MessageId = "", Subject = "(no subject)", FromAddress = "odd@x.test", DateUtcMs = 500 },
+        ]);
+
+        var inboxRows = await _store.GetMessagesAsync(inbox.Id);
+        var a = inboxRows.Single(m => m.MessageId == "<a@pat>");
+        Assert.Equal("<a@pat>", a.ThreadKey);
+        Assert.Equal("<a@pat>", inboxRows.Single(m => m.MessageId == "<c@pat>").ThreadKey); // chased through B
+        Assert.Equal("<a@pat>", inboxRows.Single(m => m.MessageId == "<d@pat>").ThreadKey); // joined by subject
+        Assert.Equal("<e@x>", inboxRows.Single(m => m.MessageId == "<e@x>").ThreadKey);
+        Assert.StartsWith("msg:", inboxRows.Single(m => m.MessageId == "").ThreadKey);
+        Assert.Equal(4, a.ThreadCount); // A, B, C, D across Inbox and Sent
+        Assert.Equal(1, inboxRows.Single(m => m.MessageId == "<e@x>").ThreadCount);
+        Assert.Equal("", inboxRows.Single(m => m.MessageId == "<e@x>").ThreadBadge);
+        Assert.Equal("4", a.ThreadBadge);
+
+        // Conversation rows: the deck thread collapses to its newest Inbox message, D.
+        var threads = await _store.GetThreadsAsync(inbox.Id);
+        Assert.Equal(3, threads.Count);
+        var deck = threads.Single(t => t.ThreadKey == "<a@pat>");
+        Assert.Equal("<d@pat>", deck.MessageId);
+        Assert.Equal(4, deck.ThreadCount);
+        Assert.Equal(4, deck.ThreadUnread);
+
+        // The timeline spans folders, oldest first.
+        var timeline = await _store.GetThreadAsync(account.Id, "<a@pat>");
+        Assert.Equal(["<a@pat>", "<b@me>", "<c@pat>", "<d@pat>"], timeline.Select(m => m.MessageId).ToArray());
+        Assert.Equal("Sent", timeline[1].FolderName);
+
+        // Waiting uses the thread too: my reply B was answered by C, so nothing is owed.
+        Assert.Empty(await _store.GetSmartViewAsync(account.Id, SmartView.Waiting, waitingDays: 36500));
+    }
+
+    [Fact]
     public async Task Update_flags_and_sender_stats()
     {
         var (_, folder) = await SeedAsync();

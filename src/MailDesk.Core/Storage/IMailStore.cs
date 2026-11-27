@@ -22,6 +22,10 @@ public interface IMailStore
     // Messages
     Task<IReadOnlyList<MessageSummary>> GetMessagesAsync(long folderId, int limit = 500, int offset = 0, CancellationToken ct = default);
     Task<MessageSummary?> GetMessageAsync(long messageId, CancellationToken ct = default);
+    /// <summary>One row per conversation in a folder: the newest message of each thread, newest first, with ThreadCount and ThreadUnread filled.</summary>
+    Task<IReadOnlyList<MessageSummary>> GetThreadsAsync(long folderId, int limit = 500, CancellationToken ct = default);
+    /// <summary>Every message of a conversation across the account's folders (Junk excluded), oldest first, with FolderName filled.</summary>
+    Task<IReadOnlyList<MessageSummary>> GetThreadAsync(long accountId, string threadKey, CancellationToken ct = default);
     Task UpsertMessagesAsync(IEnumerable<MessageSummary> messages, CancellationToken ct = default);
     Task UpdateFlagsAsync(long messageId, bool? isRead = null, bool? isFlagged = null, CancellationToken ct = default);
     Task MoveMessagesAsync(IEnumerable<long> messageIds, long targetFolderId, CancellationToken ct = default);

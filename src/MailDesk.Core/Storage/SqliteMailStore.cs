@@ -44,9 +44,68 @@ public sealed class SqliteMailStore : IMailStore
         await AddColumnIfMissingAsync(conn, "messages", "ReferencesHeader", "TEXT NOT NULL DEFAULT ''");
         await AddColumnIfMissingAsync(conn, "messages", "Category", "INTEGER NOT NULL DEFAULT 0");
         await AddColumnIfMissingAsync(conn, "messages", "SubjectKey", "TEXT NOT NULL DEFAULT ''");
-        await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_messages_subject_key ON messages(SubjectKey); CREATE INDEX IF NOT EXISTS ix_messages_in_reply_to ON messages(InReplyTo);");
+        await AddColumnIfMissingAsync(conn, "messages", "ThreadKey", "TEXT NOT NULL DEFAULT ''");
+        await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_messages_subject_key ON messages(SubjectKey); CREATE INDEX IF NOT EXISTS ix_messages_in_reply_to ON messages(InReplyTo); CREATE INDEX IF NOT EXISTS ix_messages_thread ON messages(ThreadKey);");
         await BackfillClassificationAsync(conn);
+        using (var tx = conn.BeginTransaction())
+        {
+            await AssignThreadKeysAsync(conn, tx);
+            tx.Commit();
+        }
     }
+
+    /// <summary>
+    /// Gives every message without a thread key one: the first Message-ID in References, else In-Reply-To, else its own
+    /// Message-ID (or a private key when it has none). Then two fix-ups: a key that points at a cached message which itself
+    /// belongs to another thread is chased to that thread (clients that truncate References), and a Re:/Fwd: with no thread
+    /// headers joins the earliest message in the account with the same subject key.
+    /// </summary>
+    private static async Task AssignThreadKeysAsync(SqliteConnection conn, SqliteTransaction tx)
+    {
+        await conn.ExecuteAsync("""
+            UPDATE messages SET ThreadKey =
+                CASE
+                    WHEN ReferencesHeader <> '' THEN
+                        CASE WHEN instr(ReferencesHeader, ' ') > 0 THEN substr(ReferencesHeader, 1, instr(ReferencesHeader, ' ') - 1) ELSE ReferencesHeader END
+                    WHEN InReplyTo <> '' THEN InReplyTo
+                    WHEN MessageId <> '' THEN MessageId
+                    ELSE 'msg:' || Id
+                END
+            WHERE ThreadKey = ''
+            """, transaction: tx);
+
+        for (var pass = 0; pass < 2; pass++)
+        {
+            var changed = await conn.ExecuteAsync("""
+                UPDATE messages SET ThreadKey = (SELECT p.ThreadKey FROM messages p WHERE p.MessageId = messages.ThreadKey AND p.ThreadKey <> '' LIMIT 1)
+                WHERE ThreadKey <> MessageId
+                  AND EXISTS (SELECT 1 FROM messages p WHERE p.MessageId = messages.ThreadKey AND p.ThreadKey <> '' AND p.ThreadKey <> messages.ThreadKey)
+                """, transaction: tx);
+            if (changed == 0) break;
+        }
+
+        var orphans = (await conn.QueryAsync<(long Id, long AccountId, string Subject, string SubjectKey)>("""
+            SELECT m.Id, f.AccountId, m.Subject, m.SubjectKey FROM messages m JOIN folders f ON f.Id = m.FolderId
+            WHERE m.ReferencesHeader = '' AND m.InReplyTo = '' AND m.SubjectKey <> '' AND m.ThreadKey = m.MessageId
+            """, transaction: tx)).Where(o => MessageClassifier.IsReplyOrForward(o.Subject)).ToList();
+        foreach (var o in orphans)
+        {
+            var key = await conn.QuerySingleOrDefaultAsync<string>("""
+                SELECT m.ThreadKey FROM messages m JOIN folders f ON f.Id = m.FolderId
+                WHERE f.AccountId=@acc AND m.SubjectKey=@key AND m.Id<>@id AND m.ThreadKey<>''
+                ORDER BY m.DateUtcMs LIMIT 1
+                """, new { acc = o.AccountId, key = o.SubjectKey, id = o.Id }, tx);
+            if (!string.IsNullOrEmpty(key))
+                await conn.ExecuteAsync("UPDATE messages SET ThreadKey=@key WHERE Id=@id", new { key, id = o.Id }, tx);
+        }
+    }
+
+    /// <summary>Per-thread totals over the account (Trash and Junk excluded), joined onto list rows.</summary>
+    private const string ThreadStats = """
+        LEFT JOIN (SELECT x.ThreadKey, COUNT(*) AS Cnt, SUM(CASE WHEN x.IsRead=0 THEN 1 ELSE 0 END) AS Unread
+                   FROM messages x JOIN folders xf ON xf.Id = x.FolderId
+                   WHERE xf.AccountId=@accountId AND xf.Kind NOT IN (4, 5) GROUP BY x.ThreadKey) ts ON ts.ThreadKey = m.ThreadKey
+        """;
 
     /// <summary>Rows cached before classification existed get a subject key and a sender-based category, once.</summary>
     private static async Task BackfillClassificationAsync(SqliteConnection conn)
@@ -502,10 +561,40 @@ public sealed class SqliteMailStore : IMailStore
     public async Task<IReadOnlyList<MessageSummary>> GetMessagesAsync(long folderId, int limit = 500, int offset = 0, CancellationToken ct = default)
     {
         using var conn = Open();
+        var accountId = await conn.ExecuteScalarAsync<long?>("SELECT AccountId FROM folders WHERE Id=@folderId", new { folderId }) ?? 0;
         var rows = await conn.QueryAsync<MessageSummary>(
-            "SELECT * FROM messages WHERE FolderId=@folderId ORDER BY DateUtcMs DESC LIMIT @limit OFFSET @offset",
-            new { folderId, limit, offset });
+            $"SELECT m.*, ts.Cnt AS ThreadCount, ts.Unread AS ThreadUnread FROM messages m {ThreadStats} WHERE m.FolderId=@folderId ORDER BY m.DateUtcMs DESC LIMIT @limit OFFSET @offset",
+            new { folderId, accountId, limit, offset });
         return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<MessageSummary>> GetThreadsAsync(long folderId, int limit = 500, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var accountId = await conn.ExecuteScalarAsync<long?>("SELECT AccountId FROM folders WHERE Id=@folderId", new { folderId }) ?? 0;
+        var rows = await conn.QueryAsync<MessageSummary>($"""
+            WITH ranked AS (
+                SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.ThreadKey ORDER BY r.DateUtcMs DESC, r.Id DESC) AS rn
+                FROM messages r WHERE r.FolderId=@folderId)
+            SELECT m.*, ts.Cnt AS ThreadCount, ts.Unread AS ThreadUnread
+            FROM ranked m {ThreadStats}
+            WHERE m.rn = 1 ORDER BY m.DateUtcMs DESC LIMIT @limit
+            """, new { folderId, accountId, limit });
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<MessageSummary>> GetThreadAsync(long accountId, string threadKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(threadKey)) return [];
+        using var conn = Open();
+        var rows = (await conn.QueryAsync<MessageSummary>("""
+            SELECT m.*, fo.DisplayName AS FolderName FROM messages m JOIN folders fo ON fo.Id = m.FolderId
+            WHERE fo.AccountId=@accountId AND fo.Kind <> 5 AND m.ThreadKey=@threadKey
+            ORDER BY m.DateUtcMs, m.Id
+            """, new { accountId, threadKey })).ToList();
+        var counted = rows.Count(r => r.FolderName != "Trash");
+        foreach (var r in rows) { r.ThreadCount = counted; r.ThreadUnread = rows.Count(x => !x.IsRead); }
+        return rows;
     }
 
     public async Task<MessageSummary?> GetMessageAsync(long messageId, CancellationToken ct = default)
@@ -533,6 +622,7 @@ public sealed class SqliteMailStore : IMailStore
                 ON CONFLICT(FolderId, Uid) DO UPDATE SET
                     IsRead=excluded.IsRead, IsFlagged=excluded.IsFlagged, Subject=excluded.Subject, Snippet=excluded.Snippet, SubjectKey=excluded.SubjectKey
                 """, list, tx);
+            await AssignThreadKeysAsync(conn, tx);
             var folderIds = list.Select(m => m.FolderId).Distinct().ToList();
             foreach (var fid in folderIds)
             {
@@ -754,7 +844,8 @@ public sealed class SqliteMailStore : IMailStore
                   WHERE rf.AccountId=@accountId AND rf.Kind NOT IN (2, 3) AND r.DateUtcMs > s.DateUtcMs
                     AND lower(r.FromAddress) <> lower(@me)
                     AND (
-                        (s.MessageId <> '' AND (r.InReplyTo = s.MessageId OR instr(r.ReferencesHeader, s.MessageId) > 0))
+                        (s.ThreadKey <> '' AND r.ThreadKey = s.ThreadKey)
+                        OR (s.MessageId <> '' AND (r.InReplyTo = s.MessageId OR instr(r.ReferencesHeader, s.MessageId) > 0))
                         OR (s.SubjectKey <> '' AND r.SubjectKey = s.SubjectKey AND r.FromAddress <> ''
                             AND instr(lower(s.ToAddresses || ',' || s.CcAddresses), lower(r.FromAddress)) > 0)
                     ))

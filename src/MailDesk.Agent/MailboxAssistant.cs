@@ -47,6 +47,8 @@ public sealed class MailboxToolbox
             }, additionalProperties = false }),
         new("get_message", "The full text of one message by id, plus headers. Use it when the preview is not enough to answer.",
             new { type = "object", properties = new { id = new { type = "integer" } }, required = new[] { "id" }, additionalProperties = false }),
+        new("get_conversation", "The whole conversation a message belongs to, across folders (their messages and the user's replies), oldest first, with each message's cached text. Use it to build a timeline, find what was agreed, or see whether the user already answered.",
+            new { type = "object", properties = new { message_id = new { type = "integer" } }, required = new[] { "message_id" }, additionalProperties = false }),
         new("list_folders", "Folders with counts.",
             new { type = "object", properties = new { }, additionalProperties = false }),
         new("list_events", "Calendar entries between two dates (default today to 14 days ahead): title, start, end, location, organiser, the user's response.",
@@ -97,6 +99,7 @@ public sealed class MailboxToolbox
                 "search_messages" => await SearchAsync(Str(input, "query") ?? "", Int(input, "limit", 30, 100), ct),
                 "list_messages" => await ListAsync(Str(input, "folder"), Bool(input, "unread_only"), Int(input, "limit", 30, 100), ct),
                 "get_message" => await GetAsync(input, ct),
+                "get_conversation" => await ConversationAsync(input, ct),
                 "list_folders" => await FoldersAsync(ct),
                 "list_events" => await EventsAsync(Str(input, "from_date"), Str(input, "to_date"), ct),
                 "list_tasks" => await TasksAsync(Bool(input, "include_done"), ct),
@@ -157,6 +160,44 @@ public sealed class MailboxToolbox
         foreach (var m in page) m.FolderName = folder.DisplayName;
         Remember(page);
         return JsonSerializer.Serialize(new { folder = folder.DisplayName, total_in_folder = folder.TotalCount, unread = folder.UnreadCount, messages = page.Select(Row) }, Json);
+    }
+
+    private async Task<string> ConversationAsync(JsonElement input, CancellationToken ct)
+    {
+        if (!(input.ValueKind == JsonValueKind.Object && input.TryGetProperty("message_id", out var idEl) && idEl.TryGetInt64(out var id)))
+            return JsonSerializer.Serialize(new { error = "message_id is required" });
+        var seed = await _store.GetMessageAsync(id, ct);
+        var folder = seed is null ? null : await _store.GetFolderAsync(seed.FolderId, ct);
+        if (seed is null || folder is null || folder.AccountId != _account.Id) return JsonSerializer.Serialize(new { error = "No message with that id." });
+
+        var thread = await _store.GetThreadAsync(_account.Id, seed.ThreadKey, ct);
+        if (thread.Count == 0) { seed.FolderName = folder.DisplayName; thread = [seed]; }
+        Remember(thread);
+
+        const int perMessage = 2_500;
+        var budget = MaxBodyChars * 2;
+        var items = new List<object>();
+        foreach (var m in thread)
+        {
+            string? text = null;
+            if (budget > 0)
+            {
+                var body = await _store.GetBodyAsync(m.Id, ct);
+                text = ComposeBuilder.BodyText(body);
+                text = ComposeBuilder.StripQuotedReply(text);
+                if (text.Length > perMessage) text = text[..perMessage] + "\n[truncated]";
+                budget -= text.Length;
+                if (string.IsNullOrWhiteSpace(text)) text = null;
+            }
+            items.Add(new
+            {
+                id = m.Id, folder = m.FolderName, from = m.FromDisplay, address = m.FromAddress, to = m.ToAddresses,
+                from_user = m.FromAddress.Equals(_account.Email, StringComparison.OrdinalIgnoreCase),
+                date = m.Date.ToString("yyyy-MM-dd HH:mm"), subject = m.Subject, preview = m.Snippet.Length > 160 ? m.Snippet[..160] + "…" : m.Snippet,
+                body = text ?? (budget > 0 ? "(not downloaded; use get_message)" : "(omitted for length; use get_message)"),
+            });
+        }
+        return JsonSerializer.Serialize(new { subject = thread[0].Subject, messages = items.Count, timeline = items }, Json);
     }
 
     private async Task<string> GetAsync(JsonElement input, CancellationToken ct)
@@ -293,8 +334,10 @@ public sealed class MailboxAssistant
     public static string System(string userName, string userEmail) => $"""
         You are the mailbox assistant inside {userName}'s email client ({userEmail}). Today is {DateTime.Now:dddd d MMMM yyyy}.
         Answer questions about their mail, calendar and to-do list by using the tools: search first, read a message with
-        get_message only when the preview is not enough, list_events for what is coming up, list_tasks for what is owed,
-        list_waiting for who has not replied to them, and keep tool calls few. Use search operators (from:, to:, after:,
+        get_message only when the preview is not enough, get_conversation for the whole exchange behind a message (what was
+        asked, what was agreed, whether they already replied), list_events for what is coming up, list_tasks for what is
+        owed, list_waiting for who has not replied to them, and keep tool calls few. When summarising a conversation,
+        separate what was actually said from what you infer, and say what is still open. Use search operators (from:, to:, after:,
         has:attachment) instead of scanning lists when the question names a person, a date range or attachments. Answer in plain text, briefly and specifically, quoting dates, amounts and names from the
         mail. Mention which message something came from by sender and subject so the person can find it. If the mail does
         not contain the answer, say so rather than guessing. You cannot send, move or change anything yourself. When the
