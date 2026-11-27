@@ -284,6 +284,18 @@ public sealed partial class MainViewModel : ObservableObject
 
         if (SelectedFolder.View is { } view)
         {
+            // Waiting is built from Sent, which has nothing cached until it has been opened once. Fetch it the first time.
+            if (view == SmartView.Waiting && !IsBusy)
+            {
+                var current = SelectedFolder;
+                var unsynced = SourceFoldersFor(current).Where(f => f.Folder.HighestUid == 0).ToList();
+                if (unsynced.Count > 0)
+                {
+                    await RunBusyAsync("Loading Sent mail for the first time...", async () => { foreach (var f in unsynced) await SyncFolderAsync(f); });
+                    if (!ReferenceEquals(current, SelectedFolder)) return;
+                }
+            }
+
             var rows = await _store.GetSmartViewAsync(SelectedFolder.Account.Id, view);
             foreach (var m in rows) Messages.Add(m);
             var unread = rows.Count(m => !m.IsRead);
