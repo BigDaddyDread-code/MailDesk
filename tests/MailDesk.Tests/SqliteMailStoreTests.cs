@@ -149,6 +149,85 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_operators_filter_by_sender_recipient_date_attachments_and_boolean_text()
+    {
+        var (account, inbox) = await SeedAsync();
+        long Day(int d) => new DateTimeOffset(2026, 3, d, 12, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        await _store.UpsertMessagesAsync(
+        [
+            new MessageSummary { FolderId = inbox.Id, Uid = 1, Subject = "Invoice 100", FromAddress = "accounts@supplier.test", FromName = "Supplier", ToAddresses = "me@example.test", DateUtcMs = Day(1), HasAttachments = true, Size = 3_000_000 },
+            new MessageSummary { FolderId = inbox.Id, Uid = 2, Subject = "Invoice 200", FromAddress = "pat@friend.test", ToAddresses = "me@example.test, other@example.test", DateUtcMs = Day(10), IsRead = true },
+            new MessageSummary { FolderId = inbox.Id, Uid = 3, Subject = "Car loan rates", FromAddress = "bank@bank.test", ToAddresses = "me@example.test", DateUtcMs = Day(20) },
+            new MessageSummary { FolderId = inbox.Id, Uid = 4, Subject = "Home loan rates", FromAddress = "bank@bank.test", ToAddresses = "me@example.test", DateUtcMs = Day(25) },
+        ]);
+
+        Assert.Equal("Invoice 100", Assert.Single(await _store.SearchAsync("from:supplier", account.Id)).Subject);
+        Assert.Equal("Invoice 100", Assert.Single(await _store.SearchAsync("invoice has:attachment", account.Id)).Subject);
+        Assert.Equal("Invoice 100", Assert.Single(await _store.SearchAsync("larger:2mb", account.Id)).Subject);
+        Assert.Equal("Invoice 200", Assert.Single(await _store.SearchAsync("to:other@example.test", account.Id)).Subject);
+        Assert.Equal("Invoice 200", Assert.Single(await _store.SearchAsync("invoice is:read", account.Id)).Subject);
+        Assert.Equal(2, (await _store.SearchAsync("subject:invoice", account.Id)).Count);
+
+        // Date operators: both bank mails are after the 15th; before cuts the later one off.
+        var after = await _store.SearchAsync("after:2026-03-15", account.Id);
+        Assert.Equal(2, after.Count);
+        Assert.Equal("Home loan rates", Assert.Single(await _store.SearchAsync("after:2026-03-15 -car", account.Id)).Subject);
+        Assert.Equal("Car loan rates", Assert.Single(await _store.SearchAsync("loan before:2026-03-22", account.Id)).Subject);
+
+        // Boolean text.
+        Assert.Equal(4, (await _store.SearchAsync("invoice OR loan", account.Id)).Count);
+        Assert.Equal(2, (await _store.SearchAsync("invoice OR loan -rates", account.Id)).Count);
+        Assert.Equal("Home loan rates", Assert.Single(await _store.SearchAsync("loan NOT car", account.Id)).Subject);
+    }
+
+    [Fact]
+    public async Task Smart_views_separate_priority_newsletters_notifications_and_waiting()
+    {
+        var (account, inbox) = await SeedAsync();
+        var sent = new MailFolder { AccountId = account.Id, FullName = "Sent", DisplayName = "Sent", Kind = FolderKind.Sent };
+        await _store.UpsertFolderAsync(sent);
+        var now = DateTimeOffset.UtcNow;
+        long Ago(int days) => now.AddDays(-days).ToUnixTimeMilliseconds();
+
+        await _store.UpsertMessagesAsync(
+        [
+            // Inbox: one person, one newsletter, one notification.
+            new MessageSummary { FolderId = inbox.Id, Uid = 1, Subject = "Lunch?", FromAddress = "pat@friend.test", DateUtcMs = Ago(1), Category = MessageCategory.Primary },
+            new MessageSummary { FolderId = inbox.Id, Uid = 2, Subject = "Spring sale", FromAddress = "news@shop.test", DateUtcMs = Ago(1), Category = MessageCategory.Newsletter },
+            new MessageSummary { FolderId = inbox.Id, Uid = 3, Subject = "Your code is 123456", FromAddress = "noreply@bank.test", DateUtcMs = Ago(1), Category = MessageCategory.Notification },
+            // Sent: answered by In-Reply-To, answered by subject from a recipient, unanswered, and a note to self.
+            new MessageSummary { FolderId = sent.Id, Uid = 1, MessageId = "<s1@me>", Subject = "Quote for the deck", FromAddress = "t@example.com", ToAddresses = "builder@trade.test", DateUtcMs = Ago(10) },
+            new MessageSummary { FolderId = sent.Id, Uid = 2, MessageId = "<s2@me>", Subject = "Rates query", FromAddress = "t@example.com", ToAddresses = "rates@council.test", DateUtcMs = Ago(8) },
+            new MessageSummary { FolderId = sent.Id, Uid = 3, MessageId = "<s3@me>", Subject = "Can you send the contract?", FromAddress = "t@example.com", ToAddresses = "jo@client.test", DateUtcMs = Ago(5) },
+            new MessageSummary { FolderId = sent.Id, Uid = 4, MessageId = "<s4@me>", Subject = "Note to self", FromAddress = "t@example.com", ToAddresses = "t@example.com", DateUtcMs = Ago(2) },
+            new MessageSummary { FolderId = sent.Id, Uid = 5, MessageId = "<s5@me>", Subject = "Old request", FromAddress = "t@example.com", ToAddresses = "someone@far.test", DateUtcMs = Ago(90) },
+            // Replies in the Inbox.
+            new MessageSummary { FolderId = inbox.Id, Uid = 4, Subject = "Re: Quote for the deck", FromAddress = "other@trade.test", InReplyTo = "<s1@me>", DateUtcMs = Ago(9) },
+            new MessageSummary { FolderId = inbox.Id, Uid = 5, Subject = "RE: Rates query", FromAddress = "Rates@council.test", DateUtcMs = Ago(7) },
+            // A same-subject message from someone who was not a recipient does not count as a reply.
+            new MessageSummary { FolderId = inbox.Id, Uid = 6, Subject = "Re: Can you send the contract?", FromAddress = "stranger@elsewhere.test", DateUtcMs = Ago(4) },
+        ]);
+
+        var priority = await _store.GetSmartViewAsync(account.Id, SmartView.Priority);
+        Assert.Contains(priority, m => m.Subject == "Lunch?");
+        Assert.DoesNotContain(priority, m => m.Subject == "Spring sale" || m.Subject.StartsWith("Your code"));
+        Assert.All(priority, m => Assert.Equal("Inbox", m.FolderName));
+
+        Assert.Equal("Spring sale", Assert.Single(await _store.GetSmartViewAsync(account.Id, SmartView.Newsletters)).Subject);
+        Assert.Equal("Your code is 123456", Assert.Single(await _store.GetSmartViewAsync(account.Id, SmartView.Notifications)).Subject);
+
+        var waiting = await _store.GetSmartViewAsync(account.Id, SmartView.Waiting);
+        var only = Assert.Single(waiting);
+        Assert.Equal("Can you send the contract?", only.Subject);
+        Assert.True(only.ShowRecipients);
+        Assert.Equal("Waiting 5 days", only.Badge);
+        Assert.Equal("To: jo@client.test", only.Correspondent);
+
+        // A wider window brings the old request back.
+        Assert.Equal(2, (await _store.GetSmartViewAsync(account.Id, SmartView.Waiting, waitingDays: 120)).Count);
+    }
+
+    [Fact]
     public async Task Update_flags_and_sender_stats()
     {
         var (_, folder) = await SeedAsync();

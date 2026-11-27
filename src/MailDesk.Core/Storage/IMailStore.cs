@@ -33,6 +33,13 @@ public interface IMailStore
     /// <paramref name="folderId"/> restricts the search to one folder.
     /// </summary>
     Task<IReadOnlyList<MessageSummary>> SearchAsync(string query, long? accountId = null, long? folderId = null, int limit = 200, CancellationToken ct = default);
+    /// <summary>
+    /// A dynamic list over the cache. Priority: Inbox mail classified Primary. Newsletters / Notifications: that category in
+    /// every folder except Sent, Drafts, Trash and Junk. Waiting: Sent mail from the last <paramref name="waitingDays"/>
+    /// days with no later message from a recipient that answers it (by In-Reply-To, References or normalised subject).
+    /// Rows carry <see cref="MessageSummary.FolderName"/>; Waiting rows also set ShowRecipients and a Badge.
+    /// </summary>
+    Task<IReadOnlyList<MessageSummary>> GetSmartViewAsync(long accountId, SmartView view, int limit = 500, int waitingDays = 45, CancellationToken ct = default);
 
     // Bodies
     Task<MessageBody?> GetBodyAsync(long messageId, CancellationToken ct = default);

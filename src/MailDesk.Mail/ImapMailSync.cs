@@ -121,7 +121,9 @@ public sealed class ImapMailSync : IMailSync
         folder.UidValidity = remote.UidValidity;
 
         const MessageSummaryItems items = MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.Flags
-            | MessageSummaryItems.Size | MessageSummaryItems.BodyStructure | MessageSummaryItems.PreviewText;
+            | MessageSummaryItems.Size | MessageSummaryItems.BodyStructure | MessageSummaryItems.PreviewText | MessageSummaryItems.References;
+        // The few extra headers the local classifier reads (bulk-mail and auto-submitted markers).
+        var headers = new HashSet<HeaderId> { HeaderId.ListId, HeaderId.ListUnsubscribe, HeaderId.Precedence, HeaderId.AutoSubmitted };
 
         IList<IMessageSummary> summaries;
         if (folder.HighestUid == 0)
@@ -132,14 +134,14 @@ public sealed class ImapMailSync : IMailSync
             {
                 var start = Math.Max(0, remote.Count - initialBatch);
                 progress?.Report($"Fetching {remote.Count - start} headers from {folder.DisplayName}...");
-                summaries = await remote.FetchAsync(start, -1, items, ct);
+                summaries = await remote.FetchAsync(start, -1, items, headers, ct);
             }
         }
         else
         {
             var range = new UniqueIdRange(new UniqueId((uint)folder.HighestUid + 1), UniqueId.MaxValue);
             progress?.Report($"Checking {folder.DisplayName} for new mail...");
-            summaries = await remote.FetchAsync(range, items, ct);
+            summaries = await remote.FetchAsync(range, items, headers, ct);
         }
 
         var rows = summaries.Where(s => s.UniqueId.IsValid && s.UniqueId.Id > folder.HighestUid)
@@ -165,21 +167,32 @@ public sealed class ImapMailSync : IMailSync
         var env = s.Envelope;
         var from = env?.From?.Mailboxes.FirstOrDefault();
         var flags = s.Flags ?? MessageFlags.None;
+        var subject = env?.Subject ?? "(no subject)";
+        var fromAddress = from?.Address ?? "";
+        var h = s.Headers;
+        var classifierHeaders = h is null
+            ? Core.Text.MessageClassifier.NoHeaders
+            : new Core.Text.MessageClassifier.Headers(h[HeaderId.ListId], h[HeaderId.ListUnsubscribe], h[HeaderId.Precedence], h[HeaderId.AutoSubmitted]);
         return new MessageSummary
         {
             FolderId = folderId,
             Uid = s.UniqueId.Id,
             MessageId = env?.MessageId ?? "",
-            Subject = env?.Subject ?? "(no subject)",
+            Subject = subject,
             FromName = from?.Name ?? "",
-            FromAddress = from?.Address ?? "",
+            FromAddress = fromAddress,
             ToAddresses = env?.To is null ? "" : string.Join(", ", env.To.Mailboxes.Select(m => m.Address)),
+            CcAddresses = env?.Cc is null ? "" : string.Join(", ", env.Cc.Mailboxes.Select(m => m.Address)),
             DateUtcMs = (env?.Date ?? s.InternalDate ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds(),
             IsRead = flags.HasFlag(MessageFlags.Seen),
             IsFlagged = flags.HasFlag(MessageFlags.Flagged),
             HasAttachments = s.Attachments?.Any() ?? false,
             Size = s.Size ?? 0,
             Snippet = s.PreviewText ?? "",
+            InReplyTo = env?.InReplyTo ?? "",
+            ReferencesHeader = s.References is null ? "" : string.Join(' ', s.References),
+            Category = Core.Text.MessageClassifier.Classify(fromAddress, subject, classifierHeaders),
+            SubjectKey = Core.Text.MessageClassifier.SubjectKey(subject),
         };
     }
 

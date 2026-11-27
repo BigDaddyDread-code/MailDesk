@@ -95,6 +95,24 @@ decline in their own client. Events you organise have an **Edit** button in the 
 number and can resend the updated invitation. Invitations from other people are responded to from the message they
 arrived in, not edited here.
 
+## Views: Priority, Waiting, Newsletters, Notifications
+
+The sidebar starts with four **Views** built from the local cache, one set per account, above the server folders:
+
+- **Priority**: Inbox mail from people. Every message is classified at sync time from its headers, locally and without a
+  model: `List-Unsubscribe`, `List-Id` or `Precedence: bulk` marks a newsletter; `Auto-Submitted`, bounce and no-reply
+  style senders (and system senders with transactional subjects such as receipts, codes and reminders) mark a notification;
+  everything else is correspondence. The badge is the unread count.
+- **Waiting**: mail you sent in the last 45 days that nobody has answered. A reply is any later message from one of the
+  recipients that names the sent message in `In-Reply-To` or `References`, or carries the same subject once Re:/Fwd:
+  prefixes are stripped. Each row leads with who it went to and how long it has waited; the badge is the count. Mail to
+  yourself is skipped. **Sync** on this view refreshes Sent and Inbox first.
+- **Newsletters** and **Notifications**: that category across every folder except Sent, Drafts, Trash and Junk, so the
+  Inbox can be read without them and they can still be cleared in one sweep (multi-select, Delete).
+
+Classification is stored on the message, so views are plain indexed queries. Messages cached before this existed are
+classified from sender and subject alone on first start.
+
 ## Tasks
 
 **Tasks** in the top bar is a local to-do list: add a task with an optional due date, tick it off, delete it, and show or
@@ -148,6 +166,22 @@ Folder names are searchable too: typing `finance` lists everything in a folder c
 mentions it, and `in:finance invoice` (or `folder:finance`) limits the text search to folders whose name contains
 "finance". Use an underscore for a space in the folder name: `in:family_school`.
 
+Operators narrow the search further and can be combined with free text or used on their own:
+
+| Operator | Matches |
+|---|---|
+| `from:name` / `from:address` | Sender name or address contains the value |
+| `to:address` (or `cc:`) | To or Cc contains the value |
+| `subject:word` | Subject contains the value (underscore for a space) |
+| `has:attachment` | Messages with attachments |
+| `is:unread`, `is:read`, `is:flagged` | Read and flag state |
+| `after:2026-01`, `before:2026-03-15`, `on:2026-02-01` | Date bounds: `yyyy-mm-dd`, `yyyy-mm`, `yyyy`, `today`, `yesterday`, `7d` |
+| `larger:10mb`, `smaller:500k` | Size bounds |
+| `rates OR levy`, `loan NOT car`, `loan -car` | Boolean free text (upper-case operators; a leading minus excludes a word) |
+
+The Ask-your-mailbox assistant knows the same operators, so "what did the council send me in March with an attachment?"
+becomes one search rather than a scan.
+
 ## Compose, reply, forward
 
 **New message** in the top bar opens the compose window: To, Cc/Bcc, subject, plain-text body, file attachments.
@@ -175,13 +209,29 @@ text plus a minimal HTML alternative so other clients keep the line breaks.
 If native package files hit the Windows 260-character path limit, set `MAILDESK_ARTIFACTS` to a short
 absolute path before building; `Directory.Build.props` then redirects `bin`/`obj` there.
 
-## Next steps
+## Where this sits, and what is next
 
-1. Rules engine (sender/subject match to folder), so approved groupings become permanent filters.
-2. Compose and send via MailKit SMTP; reply/forward quoting; drafts.
-3. Claude-backed `IAgentService` using the Anthropic C# SDK tool runner, with the same proposal contract.
-4. Connection pooling and IMAP IDLE for push updates; flag resync for already-cached messages.
-5. Threading, OAuth2 for Gmail/Outlook, keyboard shortcuts, notifications.
+The aim is not another client with a summary button but one that turns correspondence into things you can find, trace and
+act on while staying in control. Measured against five workspaces, this is the state of play:
+
+| Workspace | Question | Have | Missing |
+|---|---|---|---|
+| Inbox | What arrived and needs attention? | Priority view, local classification, rules, drag and drop, multi-select delete, remote-image control | Unified inbox across accounts, threading, snooze, keyboard command palette |
+| Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
+| Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant | Reminders when a wait passes a threshold, "nudge" drafts |
+| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, Ask-your-mailbox with sources, Summarise | Semantic search, conversation timelines, decisions and commitments extracted per thread, saved searches |
+| Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
+
+Everything the AI does is proposal-only: it never sends, deletes or changes a record on its own, and the review pane shows
+what it wants to do before anything happens. That rule holds for every item in the Missing column too.
+
+Engineering next steps, in order:
+
+1. Threading and a conversation timeline per subject key, so Waiting and Knowledge can show the whole exchange.
+2. Unified inbox and per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
+3. Saved searches as sidebar views, built on the search operators above.
+4. Keyboard shortcuts and a command palette.
+5. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.
 
 ## License
 

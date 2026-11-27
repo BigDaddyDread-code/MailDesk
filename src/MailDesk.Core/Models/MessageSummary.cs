@@ -11,6 +11,7 @@ public sealed class MessageSummary
     public string FromName { get; set; } = "";
     public string FromAddress { get; set; } = "";
     public string ToAddresses { get; set; } = "";
+    public string CcAddresses { get; set; } = "";
     /// <summary>Message date as Unix milliseconds UTC.</summary>
     public long DateUtcMs { get; set; }
     public bool IsRead { get; set; }
@@ -18,11 +19,36 @@ public sealed class MessageSummary
     public bool HasAttachments { get; set; }
     public long Size { get; set; }
     public string Snippet { get; set; } = "";
-    /// <summary>Display name of the containing folder. Filled by search results only; not a stored column.</summary>
+    /// <summary>The Message-ID this message answers, if any.</summary>
+    public string InReplyTo { get; set; } = "";
+    /// <summary>The References header: every Message-ID in the thread, space separated.</summary>
+    public string ReferencesHeader { get; set; } = "";
+    /// <summary>Local classification from headers; see <see cref="Text.MessageClassifier"/>.</summary>
+    public MessageCategory Category { get; set; }
+    /// <summary>Subject without Re:/Fwd: prefixes, lower-cased, for matching replies to originals. Filled in by the store when empty.</summary>
+    public string SubjectKey { get; set; } = "";
+
+    /// <summary>Display name of the containing folder. Filled by search results and views only; not a stored column.</summary>
     public string FolderName { get; set; } = "";
+    /// <summary>Short status shown as a badge in the list, e.g. how long a sent message has waited. Not stored.</summary>
+    public string Badge { get; set; } = "";
+    /// <summary>True when the row should lead with who the message went to rather than who sent it (Sent folder, Waiting view). Not stored.</summary>
+    public bool ShowRecipients { get; set; }
 
     public DateTimeOffset Date => DateTimeOffset.FromUnixTimeMilliseconds(DateUtcMs).ToLocalTime();
     public string FromDisplay => string.IsNullOrWhiteSpace(FromName) ? FromAddress : FromName;
+    public string ToDisplay
+    {
+        get
+        {
+            var all = ToAddresses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (all.Length == 0) return "(no recipients)";
+            return all.Length == 1 ? $"To: {all[0]}" : $"To: {all[0]} +{all.Length - 1}";
+        }
+    }
+    /// <summary>What the list row leads with: the sender, or the recipients for sent mail.</summary>
+    public string Correspondent => ShowRecipients ? ToDisplay : FromDisplay;
+    public string AvatarKey => ShowRecipients ? ToAddresses : FromAddress;
 }
 
 /// <summary>Full body for a message, fetched on demand and cached.</summary>

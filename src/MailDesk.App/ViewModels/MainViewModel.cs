@@ -30,6 +30,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     public ObservableCollection<Account> Accounts { get; } = [];
     public ObservableCollection<FolderItem> Folders { get; } = [];
+    /// <summary>Smart views (Priority, Waiting, Newsletters, Notifications), one set per account, shown above the folders.</summary>
+    public ObservableCollection<FolderItem> Views { get; } = [];
     public ObservableCollection<MessageSummary> Messages { get; } = [];
     public ObservableCollection<AgentProposal> Proposals { get; } = [];
     public ObservableCollection<MailRule> Rules { get; } = [];
@@ -251,12 +253,16 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Accounts.Clear();
         Folders.Clear();
+        Views.Clear();
         foreach (var a in await _store.GetAccountsAsync())
         {
             Accounts.Add(a);
             foreach (var f in await _store.GetFoldersAsync(a.Id))
                 Folders.Add(new FolderItem(a, f));
+            foreach (var v in Enum.GetValues<SmartView>())
+                Views.Add(new FolderItem(a, v));
         }
+        _ = RefreshViewCountsAsync();
         SelectedFolder ??= Folders.FirstOrDefault(f => f.Kind == FolderKind.Inbox) ?? Folders.FirstOrDefault();
         var first = Accounts.FirstOrDefault();
         WorkspaceTitle = first?.Name ?? "MailDesk";
@@ -275,9 +281,48 @@ public sealed partial class MainViewModel : ObservableObject
         SelectedMessage = null;
         if (SelectedFolder is null) return;
         ListTitle = SelectedFolder.DisplayName;
+
+        if (SelectedFolder.View is { } view)
+        {
+            var rows = await _store.GetSmartViewAsync(SelectedFolder.Account.Id, view);
+            foreach (var m in rows) Messages.Add(m);
+            var unread = rows.Count(m => !m.IsRead);
+            ListSubtitle = view switch
+            {
+                SmartView.Waiting => rows.Count == 0 ? "Nobody owes you a reply." : $"{rows.Count} sent message{(rows.Count == 1 ? "" : "s")} waiting for a reply",
+                _ => $"{rows.Count} messages, {unread} unread. {SelectedFolder.Description}",
+            };
+            SelectedFolder.UnreadCount = view == SmartView.Waiting ? rows.Count : unread;
+            return;
+        }
+
         foreach (var m in await _store.GetMessagesAsync(SelectedFolder.Folder.Id))
+        {
+            if (SelectedFolder.Kind == FolderKind.Sent) m.ShowRecipients = true;
             Messages.Add(m);
+        }
         ListSubtitle = $"{Messages.Count} messages, {SelectedFolder.UnreadCount} unread";
+    }
+
+    /// <summary>Badge counts for the views: unread for Priority, items for Waiting. Newsletters and Notifications stay quiet on purpose.</summary>
+    private async Task RefreshViewCountsAsync()
+    {
+        foreach (var v in Views.ToList())
+        {
+            try
+            {
+                if (v.View == SmartView.Priority) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.Priority)).Count(m => !m.IsRead);
+                else if (v.View == SmartView.Waiting) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.Waiting)).Count;
+            }
+            catch { /* a count is decoration; never let it break loading */ }
+        }
+    }
+
+    /// <summary>The server folders a smart view is built from, so Sync can refresh them.</summary>
+    private IEnumerable<FolderItem> SourceFoldersFor(FolderItem view)
+    {
+        var kinds = view.View == SmartView.Waiting ? new[] { FolderKind.Sent, FolderKind.Inbox } : [FolderKind.Inbox];
+        return kinds.Select(k => Folders.FirstOrDefault(f => f.Account.Id == view.Account.Id && f.Kind == k)).Where(f => f is not null)!;
     }
 
     partial void OnSelectedMessageChanged(MessageSummary? value)
@@ -533,6 +578,17 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task SyncAsync()
     {
         if (SelectedFolder is null) return;
+        if (SelectedFolder.IsView)
+        {
+            var view = SelectedFolder;
+            await RunBusyAsync($"Refreshing {view.DisplayName}...", async () =>
+            {
+                foreach (var source in SourceFoldersFor(view)) await SyncFolderAsync(source);
+                if (ReferenceEquals(view, SelectedFolder)) await LoadMessagesAsync();
+                await RefreshViewCountsAsync();
+            });
+            return;
+        }
         await RunBusyAsync($"Syncing {SelectedFolder.DisplayName}...", () => SyncFolderAsync(SelectedFolder));
     }
 
@@ -553,6 +609,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
         }
         if (ReferenceEquals(item, SelectedFolder)) await LoadMessagesAsync();
+        else if (item.Kind is FolderKind.Inbox or FolderKind.Sent) _ = RefreshViewCountsAsync();
     }
 
     private async Task ReloadFoldersKeepingSelectionAsync()
@@ -561,7 +618,7 @@ public sealed partial class MainViewModel : ObservableObject
         var selectedAccount = SelectedFolder?.Account.Id;
         await LoadAsync();
         if (selectedName is not null)
-            SelectedFolder = Folders.FirstOrDefault(f => f.Account.Id == selectedAccount && f.Folder.FullName == selectedName) ?? SelectedFolder;
+            SelectedFolder = Folders.Concat(Views).FirstOrDefault(f => f.Account.Id == selectedAccount && f.Folder.FullName == selectedName) ?? SelectedFolder;
     }
 
     // ---------------- Search ----------------
@@ -604,7 +661,7 @@ public sealed partial class MainViewModel : ObservableObject
         Messages.Clear();
         SelectedMessage = null;
         ListTitle = $"Search: {SearchText}";
-        var folderId = SearchAllFolders ? null : SelectedFolder?.Folder.Id;
+        long? folderId = SearchAllFolders || SelectedFolder is null or { IsView: true } ? null : SelectedFolder.Folder.Id;
         foreach (var m in await _store.SearchAsync(SearchText, account?.Id, folderId))
             Messages.Add(m);
         var scope = SearchAllFolders ? "all folders" : (SelectedFolder?.DisplayName ?? "this folder");
@@ -655,7 +712,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Whether a drag of messages may land on this folder: same account, and a folder that can hold moved mail.</summary>
     public bool CanDropOn(FolderItem target) =>
-        SelectedFolder is not null && target.Account.Id == SelectedFolder.Account.Id && target.Kind != FolderKind.Drafts;
+        SelectedFolder is not null && !target.IsView && target.Account.Id == SelectedFolder.Account.Id && target.Kind != FolderKind.Drafts;
 
     /// <summary>Drag-and-drop move. Messages already in the target are skipped; counts update without a full reload so search results stay put.</summary>
     public async Task MoveMessagesAsync(IReadOnlyList<MessageSummary> messages, FolderItem target)

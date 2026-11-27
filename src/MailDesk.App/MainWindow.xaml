@@ -154,14 +154,39 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <StackPanel Margin="20,16,20,8">
                         <TextBlock Text="{Binding WorkspaceTitle}" Foreground="White" FontSize="18" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding WorkspaceSubtitle}" Foreground="{StaticResource SidebarTextBrush}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
-                        <TextBlock Text="Folders" Foreground="{StaticResource SidebarTextBrush}" FontSize="13" FontWeight="SemiBold" Margin="0,18,0,0" />
+                        <TextBlock Text="Views" Foreground="{StaticResource SidebarTextBrush}" FontSize="13" FontWeight="SemiBold" Margin="0,18,0,0" />
                     </StackPanel>
-                    <ListBox Grid.Row="1" x:Name="FolderList" ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder}"
+                    <!-- Smart views share SelectedFolder with the folder list: selecting in one clears the other's highlight. -->
+                    <ListBox Grid.Row="1" x:Name="ViewList" ItemsSource="{Binding Views}" SelectedItem="{Binding SelectedFolder}"
+                             Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarItemStyle}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:FolderItem}">
+                                <Grid ToolTip="{Binding Description}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Icon}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <Border Grid.Column="2" Background="#4A154B" BorderBrush="{StaticResource SidebarTextBrush}" BorderThickness="1" CornerRadius="9" MinWidth="18" Height="18" Padding="6,0" Margin="8,0,0,0"
+                                            Visibility="{Binding HasUnread, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="{Binding UnreadText}" Foreground="White" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Grid.Row="2" Text="Folders" Foreground="{StaticResource SidebarTextBrush}" FontSize="13" FontWeight="SemiBold" Margin="20,14,20,8" />
+                    <ListBox Grid.Row="3" x:Name="FolderList" ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder}"
                              Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarItemStyle}"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              AllowDrop="True" DragOver="FolderList_DragOver" DragLeave="FolderList_DragLeave" Drop="FolderList_Drop">
@@ -230,14 +255,20 @@
                                     </Grid.RowDefinitions>
                                     <!-- Avatar -->
                                     <Border Grid.RowSpan="3" Width="36" Height="36" CornerRadius="8" Margin="0,2,12,0" VerticalAlignment="Top"
-                                            Background="{Binding FromAddress, Converter={StaticResource AvatarBrush}}">
-                                        <TextBlock Text="{Binding FromDisplay, Converter={StaticResource Initial}}" Foreground="White" FontWeight="Bold" FontSize="15"
+                                            Background="{Binding AvatarKey, Converter={StaticResource AvatarBrush}}">
+                                        <TextBlock Text="{Binding Correspondent, Converter={StaticResource Initial}}" Foreground="White" FontWeight="Bold" FontSize="15"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
-                                    <TextBlock Grid.Column="1" Text="{Binding FromDisplay}" FontSize="14" Foreground="{StaticResource TextBrush}"
+                                    <TextBlock Grid.Column="1" Text="{Binding Correspondent}" FontSize="14" Foreground="{StaticResource TextBrush}"
                                                FontWeight="{Binding IsRead, Converter={StaticResource ReadToFontWeight}}" TextTrimming="CharacterEllipsis" />
                                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <!-- Folder badge, shown on search results only -->
+                                        <!-- Status badge: how long a sent message has waited (Waiting view) -->
+                                        <Border Background="#FFF4E5" BorderBrush="#F2B36B" BorderThickness="1" CornerRadius="4"
+                                                Padding="5,0" Margin="0,0,6,0" MaxWidth="140"
+                                                Visibility="{Binding Badge, Converter={StaticResource NonEmptyToVisibility}}">
+                                            <TextBlock Text="{Binding Badge}" FontSize="11" Foreground="#8A4B08" TextTrimming="CharacterEllipsis" />
+                                        </Border>
+                                        <!-- Folder badge, shown on search results and views -->
                                         <Border Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" CornerRadius="4"
                                                 Padding="5,0" Margin="0,0,6,0" MaxWidth="120"
                                                 Visibility="{Binding FolderName, Converter={StaticResource NonEmptyToVisibility}}">

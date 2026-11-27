@@ -32,7 +32,7 @@ public sealed class MailboxToolbox
 
     public static readonly IReadOnlyList<TriageToolbox.ToolSpec> Tools =
     [
-        new("search_messages", "Full-text search over subject, sender and preview across every folder. A word that is also a folder name returns that folder's mail; 'in:finance invoice' limits to folders named like finance. Returns id, folder, from, subject, date, read state and preview.",
+        new("search_messages", "Search across every folder: free text over subject, sender and preview (AND/OR/NOT and -word work), plus operators from:, to:, subject:, in:folder, has:attachment, is:unread, is:flagged, before:/after:/on: YYYY-MM-DD (or YYYY-MM, YYYY, today, yesterday, 7d), larger:/smaller: 10mb. A word that is also a folder name returns that folder's mail. Returns id, folder, from, subject, date, read state and preview.",
             new { type = "object", properties = new
             {
                 query = new { type = "string" },
@@ -57,6 +57,12 @@ public sealed class MailboxToolbox
             }, additionalProperties = false }),
         new("list_tasks", "The user's to-do list: open tasks with due dates, or everything with include_done.",
             new { type = "object", properties = new { include_done = new { type = "boolean" } }, additionalProperties = false }),
+        new("list_waiting", "Mail the user sent that nobody has answered yet (who owes them a reply), newest first, with how many days each has waited. Also accepts view = priority, newsletters or notifications to list that smart view instead.",
+            new { type = "object", properties = new
+            {
+                view = new { type = "string", description = "waiting (default), priority, newsletters or notifications" },
+                limit = new { type = "integer", description = "Default 30, max 100" },
+            }, additionalProperties = false }),
         new("suggest_event", "Offer a calendar entry the user can add with one click (an appointment, deadline or meeting found in mail or asked for). It is not added until they click. Use local times.",
             new { type = "object", properties = new
             {
@@ -94,6 +100,7 @@ public sealed class MailboxToolbox
                 "list_folders" => await FoldersAsync(ct),
                 "list_events" => await EventsAsync(Str(input, "from_date"), Str(input, "to_date"), ct),
                 "list_tasks" => await TasksAsync(Bool(input, "include_done"), ct),
+                "list_waiting" => await ViewAsync(Str(input, "view"), Int(input, "limit", 30, 100), ct),
                 "suggest_event" => SuggestEvent(input),
                 "suggest_task" => SuggestTask(input),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown tool '{name}'." }),
@@ -111,6 +118,30 @@ public sealed class MailboxToolbox
         var hits = await _store.SearchAsync(query, _account.Id, null, limit, ct);
         Remember(hits);
         return JsonSerializer.Serialize(new { total = hits.Count, messages = hits.Select(Row) }, Json);
+    }
+
+    private async Task<string> ViewAsync(string? viewName, int limit, CancellationToken ct)
+    {
+        var view = (viewName ?? "waiting").Trim().ToLowerInvariant() switch
+        {
+            "priority" or "important" => SmartView.Priority,
+            "newsletters" or "newsletter" => SmartView.Newsletters,
+            "notifications" or "notification" => SmartView.Notifications,
+            _ => SmartView.Waiting,
+        };
+        var rows = (await _store.GetSmartViewAsync(_account.Id, view, limit, ct: ct)).ToList();
+        Remember(rows);
+        return JsonSerializer.Serialize(new
+        {
+            view = view.ToString().ToLowerInvariant(),
+            total = rows.Count,
+            messages = rows.Select(m => new
+            {
+                id = m.Id, folder = m.FolderName, from = m.FromDisplay, to = m.ToAddresses, subject = m.Subject,
+                date = m.Date.ToString("yyyy-MM-dd HH:mm"), status = string.IsNullOrEmpty(m.Badge) ? null : m.Badge,
+                read = m.IsRead, flagged = m.IsFlagged, preview = m.Snippet.Length > 160 ? m.Snippet[..160] + "…" : m.Snippet,
+            }),
+        }, Json);
     }
 
     private async Task<string> ListAsync(string? folderName, bool unreadOnly, int limit, CancellationToken ct)
@@ -263,7 +294,8 @@ public sealed class MailboxAssistant
         You are the mailbox assistant inside {userName}'s email client ({userEmail}). Today is {DateTime.Now:dddd d MMMM yyyy}.
         Answer questions about their mail, calendar and to-do list by using the tools: search first, read a message with
         get_message only when the preview is not enough, list_events for what is coming up, list_tasks for what is owed,
-        and keep tool calls few. Answer in plain text, briefly and specifically, quoting dates, amounts and names from the
+        list_waiting for who has not replied to them, and keep tool calls few. Use search operators (from:, to:, after:,
+        has:attachment) instead of scanning lists when the question names a person, a date range or attachments. Answer in plain text, briefly and specifically, quoting dates, amounts and names from the
         mail. Mention which message something came from by sender and subject so the person can find it. If the mail does
         not contain the answer, say so rather than guessing. You cannot send, move or change anything yourself. When the
         person asks to put something in the calendar or on the to-do list, or mail clearly contains an appointment or a

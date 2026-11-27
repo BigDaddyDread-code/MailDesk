@@ -1,5 +1,6 @@
 using Dapper;
 using MailDesk.Core.Models;
+using MailDesk.Core.Text;
 using Microsoft.Data.Sqlite;
 
 namespace MailDesk.Core.Storage;
@@ -38,6 +39,28 @@ public sealed class SqliteMailStore : IMailStore
         await conn.ExecuteAsync(Schema);
         await conn.ExecuteAsync(RulesSchema);
         await AddColumnIfMissingAsync(conn, "bodies", "CalendarIcs", "TEXT");
+        await AddColumnIfMissingAsync(conn, "messages", "CcAddresses", "TEXT NOT NULL DEFAULT ''");
+        await AddColumnIfMissingAsync(conn, "messages", "InReplyTo", "TEXT NOT NULL DEFAULT ''");
+        await AddColumnIfMissingAsync(conn, "messages", "ReferencesHeader", "TEXT NOT NULL DEFAULT ''");
+        await AddColumnIfMissingAsync(conn, "messages", "Category", "INTEGER NOT NULL DEFAULT 0");
+        await AddColumnIfMissingAsync(conn, "messages", "SubjectKey", "TEXT NOT NULL DEFAULT ''");
+        await conn.ExecuteAsync("CREATE INDEX IF NOT EXISTS ix_messages_subject_key ON messages(SubjectKey); CREATE INDEX IF NOT EXISTS ix_messages_in_reply_to ON messages(InReplyTo);");
+        await BackfillClassificationAsync(conn);
+    }
+
+    /// <summary>Rows cached before classification existed get a subject key and a sender-based category, once.</summary>
+    private static async Task BackfillClassificationAsync(SqliteConnection conn)
+    {
+        var rows = (await conn.QueryAsync<(long Id, string Subject, string FromAddress)>(
+            "SELECT Id, Subject, FromAddress FROM messages WHERE SubjectKey = '' AND Subject <> ''")).ToList();
+        if (rows.Count == 0) return;
+        using var tx = conn.BeginTransaction();
+        foreach (var (id, subject, from) in rows)
+        {
+            await conn.ExecuteAsync("UPDATE messages SET SubjectKey=@key, Category=@cat WHERE Id=@id",
+                new { id, key = MessageClassifier.SubjectKey(subject), cat = (int)MessageClassifier.Classify(from, subject, MessageClassifier.NoHeaders) }, tx);
+        }
+        tx.Commit();
     }
 
     /// <summary>Tiny forward-only migration: CREATE TABLE IF NOT EXISTS never adds columns to existing databases.</summary>
@@ -495,16 +518,20 @@ public sealed class SqliteMailStore : IMailStore
     {
         var list = messages.ToList();
         if (list.Count == 0) return;
+        foreach (var m in list)
+            if (string.IsNullOrEmpty(m.SubjectKey)) m.SubjectKey = MessageClassifier.SubjectKey(m.Subject);
         await _writeLock.WaitAsync(ct);
         try
         {
             using var conn = Open();
             using var tx = conn.BeginTransaction();
             await conn.ExecuteAsync("""
-                INSERT INTO messages (FolderId, Uid, MessageId, Subject, FromName, FromAddress, ToAddresses, DateUtcMs, IsRead, IsFlagged, HasAttachments, Size, Snippet)
-                VALUES (@FolderId, @Uid, @MessageId, @Subject, @FromName, @FromAddress, @ToAddresses, @DateUtcMs, @IsRead, @IsFlagged, @HasAttachments, @Size, @Snippet)
+                INSERT INTO messages (FolderId, Uid, MessageId, Subject, FromName, FromAddress, ToAddresses, CcAddresses, DateUtcMs, IsRead, IsFlagged, HasAttachments, Size, Snippet,
+                                      InReplyTo, ReferencesHeader, Category, SubjectKey)
+                VALUES (@FolderId, @Uid, @MessageId, @Subject, @FromName, @FromAddress, @ToAddresses, @CcAddresses, @DateUtcMs, @IsRead, @IsFlagged, @HasAttachments, @Size, @Snippet,
+                        @InReplyTo, @ReferencesHeader, @Category, @SubjectKey)
                 ON CONFLICT(FolderId, Uid) DO UPDATE SET
-                    IsRead=excluded.IsRead, IsFlagged=excluded.IsFlagged, Subject=excluded.Subject, Snippet=excluded.Snippet
+                    IsRead=excluded.IsRead, IsFlagged=excluded.IsFlagged, Subject=excluded.Subject, Snippet=excluded.Snippet, SubjectKey=excluded.SubjectKey
                 """, list, tx);
             var folderIds = list.Select(m => m.FolderId).Distinct().ToList();
             foreach (var fid in folderIds)
@@ -570,28 +597,50 @@ public sealed class SqliteMailStore : IMailStore
 
     public async Task<IReadOnlyList<MessageSummary>> SearchAsync(string query, long? accountId = null, long? folderId = null, int limit = 200, CancellationToken ct = default)
     {
-        var (text, folderTerms) = SplitFolderTerms(query);
-        var fts = ToFtsQuery(text);
-        if (string.IsNullOrWhiteSpace(fts) && folderTerms.Count == 0) return [];
+        var q = SearchQuery.Parse(query);
+        if (q.IsEmpty) return [];
+        var (positiveText, negatives) = SplitNegations(q.Text);
+        var fts = ToFtsQuery(positiveText);
 
         var where = new List<string>();
         var args = new DynamicParameters();
         args.Add("limit", limit);
         if (accountId is not null) { where.Add("fo.AccountId=@accountId"); args.Add("accountId", accountId); }
         if (folderId is not null) { where.Add("m.FolderId=@folderId"); args.Add("folderId", folderId); }
-        for (var i = 0; i < folderTerms.Count; i++)
+
+        void Like(string column, IReadOnlyList<string> values, string prefix)
         {
-            where.Add($"fo.DisplayName LIKE @folder{i} ESCAPE '\\'");
-            args.Add($"folder{i}", "%" + EscapeLike(folderTerms[i]) + "%");
+            for (var i = 0; i < values.Count; i++)
+            {
+                where.Add($"({column}) LIKE @{prefix}{i} ESCAPE '\\'");
+                args.Add($"{prefix}{i}", "%" + EscapeLike(values[i]) + "%");
+            }
+        }
+        Like("fo.DisplayName", q.Folders, "folder");
+        Like("m.FromAddress || ' ' || m.FromName", q.From, "from");
+        Like("m.ToAddresses || ' ' || m.CcAddresses", q.To, "to");
+        Like("m.Subject", q.Subject, "subject");
+        if (q.HasAttachment is { } att) where.Add(att ? "m.HasAttachments=1" : "m.HasAttachments=0");
+        if (q.IsRead is { } read) where.Add(read ? "m.IsRead=1" : "m.IsRead=0");
+        if (q.IsFlagged is { } flagged) where.Add(flagged ? "m.IsFlagged=1" : "m.IsFlagged=0");
+        if (q.BeforeUtcMs is { } before) { where.Add("m.DateUtcMs < @before"); args.Add("before", before); }
+        if (q.AfterUtcMs is { } after) { where.Add("m.DateUtcMs >= @after"); args.Add("after", after); }
+        if (q.MinSize is { } min) { where.Add("m.Size >= @minSize"); args.Add("minSize", min); }
+        if (q.MaxSize is { } max) { where.Add("m.Size <= @maxSize"); args.Add("maxSize", max); }
+
+        if (negatives.Count > 0)
+        {
+            args.Add("ftsNot", string.Join(" OR ", negatives.Select(n => $"\"{n}\"*")));
+            where.Add("m.Id NOT IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH @ftsNot)");
         }
         if (!string.IsNullOrWhiteSpace(fts))
         {
             args.Add("fts", fts);
             var match = "m.Id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH @fts)";
-            if (folderTerms.Count == 0)
+            if (q.Folders.Count == 0 && !HasBooleanOperators(q.Text))
             {
                 // No explicit folder filter: a plain word also finds everything in a folder of that name.
-                args.Add("folderLike", "%" + EscapeLike(text.Trim()) + "%");
+                args.Add("folderLike", "%" + EscapeLike(q.Text.Trim()) + "%");
                 match = $"({match} OR fo.DisplayName LIKE @folderLike ESCAPE '\\')";
             }
             where.Add(match);
@@ -604,31 +653,122 @@ public sealed class SqliteMailStore : IMailStore
         return rows.ToList();
     }
 
-    /// <summary>Pulls "in:name" and "folder:name" tokens out of a query. Returns the remaining text and the folder terms.</summary>
+    /// <summary>Pulls "in:name" and "folder:name" tokens out of a query. Returns the remaining text (other operators included) and the folder terms.</summary>
     public static (string text, List<string> folders) SplitFolderTerms(string query)
     {
-        var folders = new List<string>();
-        var rest = new List<string>();
-        foreach (var token in (query ?? "").Split([' ', '\t', '\n'], StringSplitOptions.RemoveEmptyEntries))
-        {
-            var lower = token.ToLowerInvariant();
-            if (lower.StartsWith("in:") && token.Length > 3) folders.Add(token[3..].Replace('_', ' '));
-            else if (lower.StartsWith("folder:") && token.Length > 7) folders.Add(token[7..].Replace('_', ' '));
-            else rest.Add(token);
-        }
-        return (string.Join(' ', rest), folders);
+        var q = SearchQuery.Parse(query);
+        return (q.Text, q.Folders);
     }
 
     private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
-    /// <summary>Turns free text into a safe FTS5 query: each word becomes a quoted prefix term.</summary>
+    /// <summary>Takes "-word" tokens out of free text. FTS5 has no unary NOT, so they become a separate exclusion.</summary>
+    public static (string positive, List<string> negatives) SplitNegations(string text)
+    {
+        var positive = new List<string>();
+        var negatives = new List<string>();
+        foreach (var t in text.Split([' ', '\t', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (t.Length > 1 && t[0] == '-') negatives.Add(t[1..].Replace("\"", ""));
+            else positive.Add(t);
+        }
+        return (string.Join(' ', positive), negatives);
+    }
+
+    private static bool IsOperator(string token) => token is "AND" or "OR" or "NOT";
+    private static bool HasBooleanOperators(string text) =>
+        text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(t => IsOperator(t) || (t.Length > 1 && t[0] == '-'));
+
+    /// <summary>
+    /// Turns free text into a safe FTS5 query: each word becomes a quoted prefix term. Upper-case AND, OR and NOT between
+    /// words are kept as operators, and "-word" means NOT word; operators with nothing to join are dropped.
+    /// </summary>
     public static string ToFtsQuery(string query)
     {
-        var terms = query.Split([' ', '\t', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t.Replace("\"", ""))
-            .Where(t => t.Length > 0)
-            .Select(t => $"\"{t}\"*");
-        return string.Join(" ", terms);
+        var tokens = new List<string>();
+        foreach (var raw in query.Split([' ', '\t', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (IsOperator(raw)) { tokens.Add(raw); continue; }
+            var word = raw.Replace("\"", "");
+            if (word.Length == 0) continue;
+            tokens.Add($"\"{word}\"*");
+        }
+
+        // Drop operators that would leave FTS5 with a syntax error: leading, trailing, or doubled up.
+        var cleaned = new List<string>();
+        foreach (var t in tokens)
+        {
+            if (IsOperator(t))
+            {
+                if (cleaned.Count == 0) continue;
+                if (!IsOperator(cleaned[^1])) cleaned.Add(t); // a second operator in a row is ignored
+            }
+            else cleaned.Add(t);
+        }
+        while (cleaned.Count > 0 && IsOperator(cleaned[^1])) cleaned.RemoveAt(cleaned.Count - 1);
+        return string.Join(" ", cleaned);
+    }
+
+    // ---------------- Smart views ----------------
+
+    private const string NotViewableKinds = "(2, 3, 4, 5)"; // Sent, Drafts, Trash, Junk
+
+    public async Task<IReadOnlyList<MessageSummary>> GetSmartViewAsync(long accountId, SmartView view, int limit = 500, int waitingDays = 45, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        const string select = "SELECT m.*, fo.DisplayName AS FolderName FROM messages m JOIN folders fo ON fo.Id = m.FolderId WHERE fo.AccountId=@accountId ";
+        switch (view)
+        {
+            case SmartView.Priority:
+                return (await conn.QueryAsync<MessageSummary>(select + "AND fo.Kind=@inbox AND m.Category=@cat ORDER BY m.DateUtcMs DESC LIMIT @limit",
+                    new { accountId, inbox = (int)FolderKind.Inbox, cat = (int)MessageCategory.Primary, limit })).ToList();
+            case SmartView.Newsletters:
+            case SmartView.Notifications:
+                var category = view == SmartView.Newsletters ? MessageCategory.Newsletter : MessageCategory.Notification;
+                return (await conn.QueryAsync<MessageSummary>(select + $"AND fo.Kind NOT IN {NotViewableKinds} AND m.Category=@cat ORDER BY m.DateUtcMs DESC LIMIT @limit",
+                    new { accountId, cat = (int)category, limit })).ToList();
+            case SmartView.Waiting:
+                return await WaitingAsync(conn, accountId, limit, waitingDays);
+            default:
+                return [];
+        }
+    }
+
+    /// <summary>
+    /// Sent mail nobody has answered. A reply is any later message in a non-Sent folder of the account that names the sent
+    /// message in In-Reply-To or References, or that comes from one of its recipients with the same normalised subject.
+    /// Mail sent only to yourself, or with no recipients, is skipped.
+    /// </summary>
+    private static async Task<IReadOnlyList<MessageSummary>> WaitingAsync(SqliteConnection conn, long accountId, int limit, int waitingDays)
+    {
+        var account = await conn.QuerySingleOrDefaultAsync<Account>("SELECT * FROM accounts WHERE Id=@accountId", new { accountId });
+        if (account is null) return [];
+        var since = DateTimeOffset.UtcNow.AddDays(-waitingDays).ToUnixTimeMilliseconds();
+        var rows = (await conn.QueryAsync<MessageSummary>("""
+            SELECT s.*, fo.DisplayName AS FolderName
+            FROM messages s JOIN folders fo ON fo.Id = s.FolderId
+            WHERE fo.AccountId=@accountId AND fo.Kind=@sent AND s.DateUtcMs >= @since
+              AND s.ToAddresses <> '' AND lower(s.ToAddresses) <> lower(@me)
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages r JOIN folders rf ON rf.Id = r.FolderId
+                  WHERE rf.AccountId=@accountId AND rf.Kind NOT IN (2, 3) AND r.DateUtcMs > s.DateUtcMs
+                    AND lower(r.FromAddress) <> lower(@me)
+                    AND (
+                        (s.MessageId <> '' AND (r.InReplyTo = s.MessageId OR instr(r.ReferencesHeader, s.MessageId) > 0))
+                        OR (s.SubjectKey <> '' AND r.SubjectKey = s.SubjectKey AND r.FromAddress <> ''
+                            AND instr(lower(s.ToAddresses || ',' || s.CcAddresses), lower(r.FromAddress)) > 0)
+                    ))
+            ORDER BY s.DateUtcMs DESC LIMIT @limit
+            """, new { accountId, sent = (int)FolderKind.Sent, since, me = account.Email, limit })).ToList();
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var m in rows)
+        {
+            m.ShowRecipients = true;
+            var days = (int)Math.Floor((now - DateTimeOffset.FromUnixTimeMilliseconds(m.DateUtcMs)).TotalDays);
+            m.Badge = days switch { <= 0 => "Sent today", 1 => "Waiting 1 day", _ => $"Waiting {days} days" };
+        }
+        return rows;
     }
 
     // ---------------- Bodies ----------------
