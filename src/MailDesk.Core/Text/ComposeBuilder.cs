@@ -30,6 +30,63 @@ public static class ComposeBuilder
         };
     }
 
+    /// <summary>
+    /// A polite follow-up. For a message you sent, it goes back to its recipients and quotes it; for a message from someone
+    /// else (a commitment they made), it replies to them. <paramref name="about"/> names the thing being chased, if known.
+    /// </summary>
+    public static OutgoingMessage Nudge(MessageSummary original, MessageBody? body, string selfAddress, string selfName, string? about = null)
+    {
+        var mine = original.FromAddress.Equals(selfAddress, StringComparison.OrdinalIgnoreCase);
+        var recipients = mine
+            ? SplitAddresses(original.ToAddresses).Where(a => !a.Equals(selfAddress, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : [original.FromAddress];
+        var greeting = Greeting(mine ? recipients.Select(a => FirstName("", a)).ToList() : [FirstName(original.FromName, original.FromAddress)]);
+        var when = original.Date.ToString("dddd d MMMM");
+        var what = string.IsNullOrWhiteSpace(about) ? $"my message below from {when} about \"{original.Subject.Trim()}\"" : about;
+        var ask = mine
+            ? $"Just following up on {what}. Could you let me know where this is at?"
+            : $"Just following up on {what}. Could you let me know how that is going?";
+        var sign = string.IsNullOrWhiteSpace(selfName) ? "" : $"\n{selfName.Split(' ')[0]}";
+        return new OutgoingMessage
+        {
+            To = mine ? string.Join(", ", recipients) : Format(original.FromName, original.FromAddress),
+            Cc = mine ? original.CcAddresses : "",
+            Subject = Prefix(original.Subject, "Re:"),
+            TextBody = $"{greeting}\n\n{ask}\n\nThanks,{sign}\n\n{QuoteHeader(original)}\n{Quote(BodyText(body))}",
+            InReplyTo = string.IsNullOrWhiteSpace(original.MessageId) ? null : original.MessageId,
+            References = string.IsNullOrWhiteSpace(original.MessageId) ? [] : [original.MessageId],
+        };
+    }
+
+    /// <summary>"Hi Pat," / "Hi Pat and Sam," / "Hi all," for three or more / "Hi," when no name is known.</summary>
+    public static string Greeting(IReadOnlyList<string> firstNames)
+    {
+        var names = firstNames.Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+        return names.Count switch
+        {
+            0 => "Hi,",
+            1 => $"Hi {names[0]},",
+            2 => $"Hi {names[0]} and {names[1]},",
+            _ => "Hi all,",
+        };
+    }
+
+    /// <summary>A first name from a display name, else from the address's local part ("pat.jones@x" → "Pat"); "" for machine-looking addresses.</summary>
+    public static string FirstName(string displayName, string address)
+    {
+        var name = (displayName ?? "").Trim().Trim('"');
+        if (name.Length > 0 && !name.Contains('@'))
+        {
+            var first = name.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries)[0];
+            return first.Length > 1 ? first : "";
+        }
+        var at = address.IndexOf('@');
+        var local = at > 0 ? address[..at] : address;
+        var token = local.Split(['.', '_', '-', '+'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+        if (token.Length < 2 || token.Any(char.IsDigit) || MessageClassifier.Classify(address, "", MessageClassifier.NoHeaders) != MessageCategory.Primary) return "";
+        return char.ToUpperInvariant(token[0]) + token[1..].ToLowerInvariant();
+    }
+
     public static OutgoingMessage Forward(MessageSummary original, MessageBody? body)
     {
         var header = string.Join("\n",

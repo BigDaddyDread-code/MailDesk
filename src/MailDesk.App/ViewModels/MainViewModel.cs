@@ -83,6 +83,64 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised by the view to show the commitments window.</summary>
     public Func<Account, Task>? RequestCommitments { get; set; }
 
+    // ---------------- Reminders ----------------
+
+    /// <summary>Raised by the view to show the reminders window.</summary>
+    public Func<Account, Task>? RequestReminders { get; set; }
+
+    /// <summary>Rule-based: unanswered sent mail, overdue commitments and tasks. Shared with the reminders window.</summary>
+    public ReminderService Reminders => _reminders ??= new ReminderService(_store);
+    private ReminderService? _reminders;
+
+    [ObservableProperty] private int _reminderCount;
+    public bool HasReminders => ReminderCount > 0;
+    partial void OnReminderCountChanged(int value) => OnPropertyChanged(nameof(HasReminders));
+
+    [RelayCommand]
+    private async Task OpenRemindersAsync()
+    {
+        var account = CurrentAccount;
+        if (RequestReminders is null || account is null) { StatusText = "Add an account first."; return; }
+        await RequestReminders(account);
+    }
+
+    /// <summary>Recounts the badge. Called on load, after syncs that can change Waiting, and when the reminders window changes something.</summary>
+    public async Task RefreshRemindersAsync(bool announce = false)
+    {
+        var account = CurrentAccount;
+        if (account is null) { ReminderCount = 0; return; }
+        try
+        {
+            var items = await Reminders.ComputeAsync(account, DateTimeOffset.UtcNow);
+            ReminderCount = items.Count;
+            if (announce && items.Count > 0)
+            {
+                var waiting = items.Count(r => r.Kind == ReminderKind.NoReply);
+                var overdue = items.Count - waiting;
+                StatusText = $"{items.Count} reminder{(items.Count == 1 ? "" : "s")}: "
+                             + string.Join(", ", new[] { waiting > 0 ? $"{waiting} waiting on a reply" : null, overdue > 0 ? $"{overdue} overdue" : null }.Where(s => s is not null))
+                             + ". Click the bell.";
+            }
+        }
+        catch { /* a badge; never let it break loading */ }
+    }
+
+    /// <summary>Opens a follow-up draft for a reminder. Returns true when the compose window reported it was sent or saved.</summary>
+    public async Task<bool> NudgeAsync(Reminder reminder)
+    {
+        var account = CurrentAccount;
+        if (reminder.Message is null || account is null || RequestCompose is null) return false;
+        MessageBody? body = null;
+        try { body = await _sync.FetchBodyAsync(account, reminder.Message); } catch { /* quote the snippet instead */ }
+        body ??= new MessageBody { MessageId = reminder.Message.Id, TextBody = reminder.Message.Snippet };
+        var about = reminder.Fact is { } f ? $"what you mentioned about \"{f.Text}\"" : null;
+        var seed = Core.Text.ComposeBuilder.Nudge(reminder.Message, body, account.Email, account.Name, about);
+        var outcome = await RequestCompose(account, seed);
+        if (outcome is null) return false;
+        StatusText = outcome;
+        return true;
+    }
+
     [RelayCommand]
     private async Task OpenCommitmentsAsync()
     {
@@ -317,6 +375,7 @@ public sealed partial class MainViewModel : ObservableObject
         ShowConversations = await _store.GetSettingAsync(ConversationsKey) == "1";
         _loadingSettings = false;
         _ = BackfillFactsAsync();
+        _ = RefreshRemindersAsync(announce: true);
         SelectedFolder ??= Folders.FirstOrDefault(f => f.Kind == FolderKind.Inbox) ?? Folders.FirstOrDefault();
         var first = Accounts.FirstOrDefault();
         WorkspaceTitle = first?.Name ?? "MailDesk";
@@ -396,6 +455,7 @@ public sealed partial class MainViewModel : ObservableObject
             }
             catch { /* a count is decoration; never let it break loading */ }
         }
+        await RefreshRemindersAsync();
     }
 
     /// <summary>The server folders a smart view is built from, so Sync can refresh them.</summary>

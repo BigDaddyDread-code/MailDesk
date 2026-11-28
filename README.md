@@ -146,6 +146,22 @@ while items the new analysis no longer finds are dropped. **Open** shows the sou
 yours into a task. The assistant reads the same table through `list_commitments`, so "what have I promised people?" works.
 Only analysed conversations are covered: this is a ledger of what you chose to extract, not a scan of the mailbox.
 
+## Reminders and nudges
+
+The bell in the top bar counts what needs a nudge or a look, worked out locally from the cache with no model involved:
+
+- **Waiting on a reply**: mail you sent that has had no answer for longer than the threshold (default 5 days, set in the
+  window: 2 to 21). Uses the same reply matching as the Waiting view.
+- **Owed to you** and **You owe**: commitments from analysed conversations past their date.
+- **Task**: tasks past their due date.
+
+The window lists them oldest first. **Nudge** opens a follow-up in the compose window, addressed to the original recipients
+(or to the person who made the promise), with a short note ("Just following up on my message below from Monday 3 November
+about …") and the original quoted underneath, threaded with In-Reply-To so it lands in the same conversation. Nothing is
+sent until you click Send; once you do, the reminder is snoozed for the threshold again. **Open** shows the message or the
+task list. **3 days** and **1 week** snooze; the cross dismisses for good. Snoozes live in the local settings table and are
+listed again with **Show snoozed**. On start the status bar says how many reminders there are.
+
 ## Views: Priority, Waiting, Newsletters, Notifications
 
 The sidebar starts with four **Views** built from the local cache, one set per account, above the server folders:
@@ -269,7 +285,7 @@ act on while staying in control. Measured against five workspaces, this is the s
 |---|---|---|---|
 | Inbox | What arrived and needs attention? | Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Unified inbox across accounts, snooze, keyboard command palette, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
-| Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant | Reminders when a wait passes a threshold, "nudge" drafts |
+| Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant, reminders after a threshold with one-click nudge drafts, snooze and dismiss | Reminders as Windows notifications when the app is in the background |
 | Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, decisions / commitments / open questions per thread linked to their source message, Commitments ledger across conversations, `get_conversation` and `list_commitments` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, saved searches, automatic analysis of new replies in already-analysed threads |
 | Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
 
@@ -279,8 +295,8 @@ what it wants to do before anything happens. That rule holds for every item in t
 Engineering next steps, in order:
 
 1. Unified inbox and per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
-2. Reminders when a Waiting item or a commitment passes its date, and a one-click "nudge" draft.
-3. Saved searches as sidebar views, built on the search operators above.
+2. Saved searches as sidebar views, built on the search operators above.
+3. Windows notifications for new priority mail and reminders while the app is in the background.
 4. Keyboard shortcuts and a command palette.
 5. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.
 

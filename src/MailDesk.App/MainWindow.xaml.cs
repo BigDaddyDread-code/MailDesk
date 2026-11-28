@@ -43,6 +43,18 @@ public partial class MainWindow : FluentWindow
             new TasksWindow(tasksVm) { Owner = this }.Show();
             return Task.CompletedTask;
         };
+        vm.RequestReminders = account =>
+        {
+            var remindersVm = new RemindersViewModel(_vm.Reminders, account)
+            {
+                RequestOpenMessage = id => { Activate(); return _vm.OpenMessageAsync(id); },
+                RequestOpenTasks = () => _vm.RequestTasks is null ? Task.CompletedTask : _vm.RequestTasks(account),
+                RequestNudge = reminder => _vm.NudgeAsync(reminder),
+                Changed = () => _ = _vm.RefreshRemindersAsync(),
+            };
+            new RemindersWindow(remindersVm) { Owner = this }.Show();
+            return Task.CompletedTask;
+        };
         vm.RequestCommitments = account =>
         {
             var commitmentsVm = new CommitmentsViewModel(_store, account) { RequestOpenMessage = id => { Activate(); return _vm.OpenMessageAsync(id); } };

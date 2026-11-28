@@ -134,6 +134,16 @@
                     </Border>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <!-- Reminders bell: unanswered sent mail, overdue commitments and tasks -->
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenRemindersCommand}" ToolTip="Reminders: sent mail without a reply, overdue commitments and tasks" Margin="0,0,6,0">
+                            <Grid>
+                                <TextBlock Text="&#xEA8F;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center" />
+                                <Border Background="#E01E5A" CornerRadius="8" MinWidth="16" Height="16" Padding="4,0" Margin="10,-10,-10,0" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Visibility="{Binding HasReminders, Converter={StaticResource BoolToVisibility}}">
+                                    <TextBlock Text="{Binding ReminderCount}" Foreground="White" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </Grid>
+                        </Button>
                         <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenAiSettingsCommand}" ToolTip="AI settings">
                             <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
                         </Button>
