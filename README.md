@@ -162,10 +162,10 @@ sent until you click Send; once you do, the reminder is snoozed for the threshol
 task list. **3 days** and **1 week** snooze; the cross dismisses for good. Snoozes live in the local settings table and are
 listed again with **Show snoozed**. On start the status bar says how many reminders there are.
 
-## Views: Priority, Waiting, Newsletters, Notifications
+## Views: Priority, Waiting, Newsletters, Notifications, Clean up
 
 The sidebar starts with **Views** built from the local cache, above the server folders. **All inboxes** comes first and is
-account-wide; the other four come one set per account:
+account-wide; the other five come one set per account:
 
 - **All inboxes**: every account's Inbox in one list, newest first. With two or more accounts each row carries the account
   name, the folder list grows a header per account, and a search started from this view covers every account. Every action
@@ -182,6 +182,26 @@ account-wide; the other four come one set per account:
   yourself is skipped. **Sync** on this view refreshes Sent and Inbox first.
 - **Newsletters** and **Notifications**: that category across every folder except Sent, Drafts, Trash and Junk, so the
   Inbox can be read without them and they can still be cleared in one sweep (multi-select, Delete).
+- **Clean up**: Inbox mail from senders you nearly always get rid of. See the next section.
+
+### Learning what you get rid of
+
+Every time you move mail to Trash yourself (Delete, the trash button, the context menu, or a drag onto Trash), the client
+notes the sender. Rules and the agent never teach it: only your own hand does. From that log and the cache it works out,
+per sender, how many messages you binned and how many you read and kept. A sender becomes a habit once you have binned at
+least 3 of their messages and at least 75% of the ones you decided on; unread mail still in the Inbox counts as undecided.
+
+- The **Clean up** view lists that mail, newest first, each row badged with the history ("Binned all 6", "Binned 5, kept 1").
+  Its badge is the count. Select all and press Delete to clear it, or right-click a row to make a rule for the sender.
+- **Habits** (the button on the Clean up view, or the palette) shows every sender you have binned mail from, with the
+  counts, the share binned, the last time, how many are in the Inbox now, and why each is or is not suggested. Per sender:
+  **Bin now** moves their Inbox mail to Trash, **Make rule...** opens the rule editor already set to From equals that address
+  with Move to Trash (nothing happens until you save), and **Ignore sender** stops the suggestion without forgetting the
+  history. The thresholds are written on the window so the list is never a mystery.
+- The assistant sees the same list through `list_waiting` with `view = cleanup`, badge included.
+
+Binning by hand through this view teaches the same way, so the suggestions firm up the more you use it. Nothing is ever
+removed on its own: the view shows, you decide.
 
 Classification is stored on the message, so views are plain indexed queries. Messages cached before this existed are
 classified from sender and subject alone on first start.
@@ -330,11 +350,11 @@ act on while staying in control. Measured against five workspaces, this is the s
 
 | Workspace | Question | Have | Missing |
 |---|---|---|---|
-| Inbox | What arrived and needs attention? | All inboxes across accounts, Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control, command palette and keyboard shortcuts | Snooze, thread-wide move and delete |
+| Inbox | What arrived and needs attention? | All inboxes across accounts, Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control, command palette and keyboard shortcuts, Clean up view learned from what you bin | Snooze, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
 | Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant, reminders after a threshold with one-click nudge drafts, snooze and dismiss | Reminders as Windows notifications when the app is in the background |
 | Knowledge | What was discussed, agreed or promised? | Search operators, folder search, saved searches as live sidebar views, conversation timeline, decisions / commitments / open questions per thread linked to their source message, Commitments ledger across conversations, `get_conversation`, `list_commitments` and `list_saved_searches` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, automatic analysis of new replies in already-analysed threads |
-| Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
+| Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox, sender habits with one-click rule from what you already bin | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
 
 Everything the AI does is proposal-only: it never sends, deletes or changes a record on its own, and the review pane shows
 what it wants to do before anything happens. That rule holds for every item in the Missing column too.

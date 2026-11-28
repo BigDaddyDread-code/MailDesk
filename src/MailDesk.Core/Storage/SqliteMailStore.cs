@@ -203,6 +203,15 @@ public sealed class SqliteMailStore : IMailStore
         );
         CREATE INDEX IF NOT EXISTS ix_thread_facts_account ON thread_facts(AccountId, IsDone, DueUtcMs);
         CREATE INDEX IF NOT EXISTS ix_thread_facts_thread ON thread_facts(ThreadKey);
+        CREATE TABLE IF NOT EXISTS disposition_log (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            AccountId INTEGER NOT NULL REFERENCES accounts(Id) ON DELETE CASCADE,
+            FromAddress TEXT NOT NULL,
+            Action TEXT NOT NULL,
+            MessageId INTEGER,
+            UtcMs INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_disposition_account ON disposition_log(AccountId, FromAddress);
         CREATE TABLE IF NOT EXISTS saved_searches (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
             AccountId INTEGER REFERENCES accounts(Id) ON DELETE CASCADE,
@@ -404,6 +413,71 @@ public sealed class SqliteMailStore : IMailStore
             "SELECT Key, Value FROM settings WHERE Value IS NOT NULL AND Key LIKE @like ESCAPE '\\' ORDER BY Key",
             new { like = EscapeLike(prefix) + "%" });
         return rows.ToList();
+    }
+
+    // ---------------- Habits ----------------
+
+    private static string IgnoreKey(long accountId, string address) => $"habits.ignore:{accountId}:{address.Trim().ToLowerInvariant()}";
+
+    public async Task LogTrashedAsync(long accountId, IEnumerable<MessageSummary> messages, long utcMs, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        foreach (var m in messages)
+        {
+            if (string.IsNullOrWhiteSpace(m.FromAddress)) continue;
+            await conn.ExecuteAsync("INSERT INTO disposition_log (AccountId, FromAddress, Action, MessageId, UtcMs) VALUES (@accountId, @from, 'trash', @id, @utcMs)",
+                new { accountId, from = m.FromAddress.Trim().ToLowerInvariant(), id = m.Id, utcMs }, tx);
+        }
+        tx.Commit();
+    }
+
+    public async Task<IReadOnlyList<SenderHabit>> GetSenderHabitsAsync(long accountId, int minTrashed = 1, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        // Binned by hand (the log survives Trash being emptied); kept = read and still outside Trash/Junk; in inbox = anything still in an Inbox.
+        var rows = await conn.QueryAsync<SenderHabit>("""
+            SELECT d.FromAddress,
+                   COALESCE((SELECT m.FromName FROM messages m JOIN folders f ON f.Id = m.FolderId
+                             WHERE f.AccountId=@accountId AND LOWER(m.FromAddress)=d.FromAddress AND m.FromName<>'' ORDER BY m.DateUtcMs DESC LIMIT 1), '') AS FromName,
+                   COUNT(*) AS Trashed,
+                   MAX(d.UtcMs) AS LastTrashedUtcMs,
+                   (SELECT COUNT(*) FROM messages m JOIN folders f ON f.Id = m.FolderId
+                    WHERE f.AccountId=@accountId AND LOWER(m.FromAddress)=d.FromAddress AND m.IsRead=1 AND f.Kind NOT IN (4, 5)) AS Kept,
+                   (SELECT COUNT(*) FROM messages m JOIN folders f ON f.Id = m.FolderId
+                    WHERE f.AccountId=@accountId AND LOWER(m.FromAddress)=d.FromAddress AND f.Kind=@inbox) AS InInbox
+            FROM disposition_log d
+            WHERE d.AccountId=@accountId AND d.Action='trash'
+            GROUP BY d.FromAddress
+            HAVING COUNT(*) >= @minTrashed
+            ORDER BY Trashed DESC, LastTrashedUtcMs DESC
+            """, new { accountId, minTrashed, inbox = (int)FolderKind.Inbox });
+        var list = rows.ToList();
+        if (list.Count == 0) return list;
+        var ignored = (await GetSettingsByPrefixAsync($"habits.ignore:{accountId}:", ct)).Where(s => s.Value == "1").Select(s => s.Key).ToHashSet();
+        foreach (var h in list) h.Ignored = ignored.Contains(IgnoreKey(accountId, h.FromAddress));
+        return list;
+    }
+
+    public Task SetSenderIgnoredAsync(long accountId, string fromAddress, bool ignored, CancellationToken ct = default) =>
+        SetSettingAsync(IgnoreKey(accountId, fromAddress), ignored ? "1" : null, ct);
+
+    /// <summary>Inbox mail from senders whose mail the user nearly always bins, newest first, each row saying what happened before.</summary>
+    private async Task<IReadOnlyList<MessageSummary>> CleanUpAsync(long accountId, int limit, CancellationToken ct)
+    {
+        var habits = (await GetSenderHabitsAsync(accountId, SenderHabit.MinTrashed, ct)).Where(h => h.IsHabit && h.InInbox > 0).ToList();
+        if (habits.Count == 0) return [];
+        using var conn = Open();
+        var rows = await conn.QueryAsync<MessageSummary>("""
+            SELECT m.*, fo.DisplayName AS FolderName FROM messages m JOIN folders fo ON fo.Id = m.FolderId
+            WHERE fo.AccountId=@accountId AND fo.Kind=@inbox AND LOWER(m.FromAddress) IN @senders
+            ORDER BY m.DateUtcMs DESC LIMIT @limit
+            """, new { accountId, inbox = (int)FolderKind.Inbox, senders = habits.Select(h => h.FromAddress).ToArray(), limit });
+        var byAddress = habits.ToDictionary(h => h.FromAddress, StringComparer.OrdinalIgnoreCase);
+        var list = rows.ToList();
+        foreach (var m in list)
+            if (byAddress.TryGetValue(m.FromAddress.Trim(), out var h)) m.Badge = h.Summary;
+        return list;
     }
 
     // ---------------- Saved searches ----------------
@@ -944,6 +1018,8 @@ public sealed class SqliteMailStore : IMailStore
                     new { accountId, cat = (int)category, limit })).ToList();
             case SmartView.Waiting:
                 return await WaitingAsync(conn, accountId, limit, waitingDays);
+            case SmartView.CleanUp:
+                return await CleanUpAsync(accountId, limit, ct);
             default:
                 return [];
         }

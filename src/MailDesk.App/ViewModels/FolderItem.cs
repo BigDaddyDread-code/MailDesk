@@ -66,6 +66,7 @@ public sealed partial class FolderItem : ObservableObject
         SmartView.Waiting => "",
         SmartView.Newsletters => "",
         SmartView.Notifications => "",
+        SmartView.CleanUp => "\uE74D",
         _ => Kind switch
         {
             FolderKind.Inbox => "",
@@ -85,6 +86,7 @@ public sealed partial class FolderItem : ObservableObject
         SmartView.Waiting => "Mail you sent that has not been answered",
         SmartView.Newsletters => "Mailing lists and marketing",
         SmartView.Notifications => "Receipts, codes, alerts and other automatic mail",
+        SmartView.CleanUp => "Inbox mail from senders you nearly always bin, learned from what you did before",
         _ => Folder.FullName,
     };
 
@@ -95,6 +97,7 @@ public sealed partial class FolderItem : ObservableObject
         SmartView.Waiting => "Waiting",
         SmartView.Newsletters => "Newsletters",
         SmartView.Notifications => "Notifications",
+        SmartView.CleanUp => "Clean up",
         _ => view.ToString(),
     };
 

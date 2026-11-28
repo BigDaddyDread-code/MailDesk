@@ -66,7 +66,7 @@ public sealed class MailboxToolbox
         new("list_waiting","Mail the user sent that nobody has answered yet (who owes them a reply), newest first, with how many days each has waited. Also accepts view = priority, newsletters or notifications to list that smart view instead.",
             new { type = "object", properties = new
             {
-                view = new { type = "string", description = "waiting (default), priority, newsletters or notifications" },
+                view = new { type = "string", description = "waiting (default), priority, newsletters, notifications, or cleanup (Inbox mail from senders the user nearly always bins; each row says how many were binned and kept)" },
                 limit = new { type = "integer", description = "Default 30, max 100" },
             }, additionalProperties = false }),
         new("suggest_event", "Offer a calendar entry the user can add with one click (an appointment, deadline or meeting found in mail or asked for). It is not added until they click. Use local times.",
@@ -154,6 +154,7 @@ public sealed class MailboxToolbox
             "priority" or "important" => SmartView.Priority,
             "newsletters" or "newsletter" => SmartView.Newsletters,
             "notifications" or "notification" => SmartView.Notifications,
+            "cleanup" or "clean up" or "clean_up" => SmartView.CleanUp,
             _ => SmartView.Waiting,
         };
         var rows = (await _store.GetSmartViewAsync(_account.Id, view, limit, ct: ct)).ToList();

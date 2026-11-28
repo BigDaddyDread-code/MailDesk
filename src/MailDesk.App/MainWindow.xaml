@@ -295,6 +295,16 @@
                             <TextBlock Text="{Binding ListTitle}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis" />
                             <TextBlock Text="{Binding ListSubtitle}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
+                        <!-- Clean up view only: review what has been learned about senders you bin -->
+                        <Button Grid.Column="1" Command="{Binding OpenHabitsCommand}" VerticalAlignment="Top" Margin="8,0,0,0" Padding="8,3" FontSize="11" Cursor="Hand"
+                                Background="{StaticResource SurfaceAltBrush}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1" Foreground="{StaticResource MutedTextBrush}"
+                                ToolTip="Which senders you usually bin, with Make rule, Bin now and Ignore"
+                                Visibility="{Binding IsCleanUpView, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE9D9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="11" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                <TextBlock Text="Habits" FontSize="11" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
                         <!-- One row per conversation (newest message of each thread) instead of one per message -->
                         <ToggleButton Grid.Column="1" IsChecked="{Binding ShowConversations}" VerticalAlignment="Top" Margin="8,0,0,0" Padding="8,3" FontSize="11" Cursor="Hand"
                                       ToolTip="Group the list by conversation. Each row is the newest message of its thread; the count shows how many messages it holds."

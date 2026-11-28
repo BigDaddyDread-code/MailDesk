@@ -370,6 +370,70 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Habits_learn_from_hand_trashing_and_feed_the_clean_up_view()
+    {
+        var (account, inbox) = await SeedAsync();
+        var trash = new MailFolder { AccountId = account.Id, FullName = "Trash", DisplayName = "Trash", Kind = FolderKind.Trash };
+        await _store.UpsertFolderAsync(trash);
+
+        // Deals: four binned, none kept. Friend: one binned, three read and kept. Shop: three binned but two kept (60%).
+        var rows = new List<MessageSummary>();
+        for (var i = 1; i <= 4; i++) rows.Add(new MessageSummary { FolderId = trash.Id, Uid = (uint)i, FromAddress = "Deals@shop.test", FromName = "Daily Deals", Subject = $"Deal {i}", DateUtcMs = i, IsRead = true });
+        rows.Add(new MessageSummary { FolderId = inbox.Id, Uid = 10, FromAddress = "deals@shop.test", FromName = "Daily Deals", Subject = "Deal today", DateUtcMs = 100 });
+        rows.Add(new MessageSummary { FolderId = inbox.Id, Uid = 11, FromAddress = "deals@shop.test", FromName = "Daily Deals", Subject = "Deal tomorrow", DateUtcMs = 101 });
+        rows.Add(new MessageSummary { FolderId = trash.Id, Uid = 20, FromAddress = "pat@friend.test", FromName = "Pat", Subject = "Old", DateUtcMs = 5, IsRead = true });
+        for (var i = 21; i <= 23; i++) rows.Add(new MessageSummary { FolderId = inbox.Id, Uid = (uint)i, FromAddress = "pat@friend.test", FromName = "Pat", Subject = $"Chat {i}", DateUtcMs = i, IsRead = true });
+        for (var i = 30; i <= 32; i++) rows.Add(new MessageSummary { FolderId = trash.Id, Uid = (uint)i, FromAddress = "news@other.test", Subject = $"News {i}", DateUtcMs = i, IsRead = true });
+        for (var i = 33; i <= 34; i++) rows.Add(new MessageSummary { FolderId = inbox.Id, Uid = (uint)i, FromAddress = "news@other.test", Subject = $"News {i}", DateUtcMs = i, IsRead = true });
+        await _store.UpsertMessagesAsync(rows);
+        var all = (await _store.GetMessagesAsync(trash.Id)).Concat(await _store.GetMessagesAsync(inbox.Id)).ToList();
+
+        await _store.LogTrashedAsync(account.Id, all.Where(m => m.FolderId == trash.Id), 1_000);
+
+        var habits = await _store.GetSenderHabitsAsync(account.Id);
+        var deals = habits.Single(h => h.FromAddress == "deals@shop.test"); // address lower-cased, name kept
+        Assert.Equal("Daily Deals", deals.FromName);
+        Assert.Equal(4, deals.Trashed);
+        Assert.Equal(0, deals.Kept);          // the two in the Inbox are unread: undecided, not kept
+        Assert.Equal(2, deals.InInbox);
+        Assert.True(deals.IsHabit);
+        Assert.Equal("Binned all 4", deals.Summary);
+
+        var pat = habits.Single(h => h.FromAddress == "pat@friend.test");
+        Assert.Equal(1, pat.Trashed);
+        Assert.Equal(3, pat.Kept);
+        Assert.False(pat.IsHabit);
+
+        var news = habits.Single(h => h.FromAddress == "news@other.test");
+        Assert.Equal(3, news.Trashed);
+        Assert.Equal(2, news.Kept);
+        Assert.False(news.IsHabit);            // 60% binned is below the bar
+        Assert.Equal(0.6, news.TrashRatio, 3);
+
+        Assert.Equal(["deals@shop.test"], (await _store.GetSenderHabitsAsync(account.Id, SenderHabit.MinTrashed)).Where(h => h.IsHabit).Select(h => h.FromAddress).ToArray());
+
+        // The Clean up view: only Deals' Inbox mail, newest first, each row saying why.
+        var cleanUp = await _store.GetSmartViewAsync(account.Id, SmartView.CleanUp);
+        Assert.Equal(["Deal tomorrow", "Deal today"], cleanUp.Select(m => m.Subject).ToArray());
+        Assert.All(cleanUp, m => Assert.Equal("Binned all 4", m.Badge));
+
+        // Ignoring a sender silences the suggestion without forgetting the history.
+        await _store.SetSenderIgnoredAsync(account.Id, "Deals@shop.test", true);
+        var ignored = (await _store.GetSenderHabitsAsync(account.Id)).Single(h => h.FromAddress == "deals@shop.test");
+        Assert.True(ignored.Ignored);
+        Assert.False(ignored.IsHabit);
+        Assert.Equal(4, ignored.Trashed);
+        Assert.Empty(await _store.GetSmartViewAsync(account.Id, SmartView.CleanUp));
+
+        await _store.SetSenderIgnoredAsync(account.Id, "deals@shop.test", false);
+        Assert.Equal(2, (await _store.GetSmartViewAsync(account.Id, SmartView.CleanUp)).Count);
+
+        // Messages without a sender teach nothing.
+        await _store.LogTrashedAsync(account.Id, [new MessageSummary { FromAddress = "" }], 2_000);
+        Assert.Equal(3, (await _store.GetSenderHabitsAsync(account.Id)).Count);
+    }
+
+    [Fact]
     public async Task Saved_searches_keep_sidebar_order_update_in_place_and_follow_their_account()
     {
         var (account, folder) = await SeedAsync();

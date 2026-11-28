@@ -414,7 +414,69 @@ public sealed partial class MainViewModel : ObservableObject
 
     partial void OnSelectedFolderChanged(FolderItem? value)
     {
+        OnPropertyChanged(nameof(IsCleanUpView));
         _ = LoadMessagesAsync();
+    }
+
+    // ---------------- Habits: learning what you get rid of ----------------
+
+    public bool IsCleanUpView => SelectedFolder?.View == SmartView.CleanUp;
+
+    /// <summary>Raised by the view to show the habits window.</summary>
+    public Func<Account, Task>? RequestHabits { get; set; }
+
+    [RelayCommand]
+    private async Task OpenHabitsAsync()
+    {
+        var account = CurrentAccount;
+        if (RequestHabits is null || account is null) { StatusText = "Add an account first."; return; }
+        await RequestHabits(account);
+    }
+
+    /// <summary>Records a hand move to Trash so the Clean up view can learn, then refreshes its badge.</summary>
+    private async Task LearnTrashedAsync(Account account, IReadOnlyList<MessageSummary> messages)
+    {
+        try
+        {
+            await _store.LogTrashedAsync(account.Id, messages, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            var cleanUp = Views.FirstOrDefault(v => v.Account.Id == account.Id && v.View == SmartView.CleanUp);
+            if (cleanUp is null) return;
+            var before = cleanUp.UnreadCount;
+            cleanUp.UnreadCount = (await _store.GetSmartViewAsync(account.Id, SmartView.CleanUp)).Count;
+            if (cleanUp.UnreadCount > before)
+                StatusText += $" Clean up now has {cleanUp.UnreadCount} message{(cleanUp.UnreadCount == 1 ? "" : "s")} from senders you usually bin.";
+        }
+        catch { /* learning is decoration; never let it break a move */ }
+    }
+
+    /// <summary>Starts a rule for a sender the user keeps binning: From equals the address, action Move to Trash. The editor still has to be saved.</summary>
+    public Task CreateTrashRuleForSenderAsync(string fromAddress, string fromName) => EditRuleAsync(new MailRule
+    {
+        Name = string.IsNullOrWhiteSpace(fromName) ? "" : $"Bin mail from {fromName}",
+        Conditions = [new RuleCondition(RuleField.FromAddress, RuleOperator.Equals, fromAddress)],
+        Action = RuleAction.MoveToTrash,
+    });
+
+    /// <summary>Moves this sender's Inbox mail to Trash now. Returns how many went.</summary>
+    public async Task<int> TrashInboxFromSenderAsync(Account account, string fromAddress)
+    {
+        var inbox = Folders.FirstOrDefault(f => f.Account.Id == account.Id && f.Kind == FolderKind.Inbox);
+        var trash = Folders.FirstOrDefault(f => f.Account.Id == account.Id && f.Kind == FolderKind.Trash);
+        if (inbox is null || trash is null) return 0;
+        var messages = (await _store.GetMessagesAsync(inbox.Folder.Id))
+            .Where(m => string.Equals(m.FromAddress.Trim(), fromAddress.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+        if (messages.Count == 0) return 0;
+        // Resolve against the live list so rows disappear from whatever is showing.
+        var live = messages.Select(m => Messages.FirstOrDefault(x => x.Id == m.Id) ?? m).ToList();
+        await _sync.MoveAsync(account, live, trash.Folder);
+        foreach (var m in live)
+        {
+            Messages.Remove(m);
+            if (!m.IsRead) { inbox.UnreadCount = Math.Max(0, inbox.UnreadCount - 1); trash.UnreadCount++; }
+        }
+        await LearnTrashedAsync(account, live);
+        if (SelectedFolder is { IsView: true }) await LoadMessagesAsync();
+        return live.Count;
     }
 
     private const string ConversationsKey = "list.conversations";
@@ -467,9 +529,12 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 SmartView.Waiting => rows.Count == 0 ? "Nobody owes you a reply." : $"{rows.Count} sent message{(rows.Count == 1 ? "" : "s")} waiting for a reply",
                 SmartView.AllInboxes => $"{rows.Count} messages across {Accounts.Count} account{(Accounts.Count == 1 ? "" : "s")}, {unread} unread",
+                SmartView.CleanUp => rows.Count == 0
+                    ? "Nothing to clear. This view learns from what you move to Trash yourself: once a sender has been binned a few times and rarely kept, their Inbox mail shows here."
+                    : $"{rows.Count} message{(rows.Count == 1 ? "" : "s")} from {rows.Select(m => m.FromAddress.ToLowerInvariant()).Distinct().Count()} sender{(rows.Select(m => m.FromAddress.ToLowerInvariant()).Distinct().Count() == 1 ? "" : "s")} you usually bin. Select all and press Delete, or open Habits to make rules.",
                 _ => $"{rows.Count} messages, {unread} unread. {SelectedFolder.Description}",
             };
-            SelectedFolder.UnreadCount = view == SmartView.Waiting ? rows.Count : unread;
+            SelectedFolder.UnreadCount = view is SmartView.Waiting or SmartView.CleanUp ? rows.Count : unread;
             return;
         }
 
@@ -487,7 +552,7 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>Badge counts for the views: unread for Priority, items for Waiting. Newsletters and Notifications stay quiet on purpose.</summary>
-    private async Task RefreshViewCountsAsync()
+    public async Task RefreshViewCountsAsync()
     {
         foreach (var v in Views.ToList())
         {
@@ -496,6 +561,7 @@ public sealed partial class MainViewModel : ObservableObject
                 if (v.View == SmartView.AllInboxes) v.UnreadCount = Folders.Where(f => f.Kind == FolderKind.Inbox).Sum(f => f.UnreadCount);
                 else if (v.View == SmartView.Priority) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.Priority)).Count(m => !m.IsRead);
                 else if (v.View == SmartView.Waiting) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.Waiting)).Count;
+                else if (v.View == SmartView.CleanUp) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.CleanUp)).Count;
             }
             catch { /* a count is decoration; never let it break loading */ }
         }
@@ -1151,6 +1217,8 @@ public sealed partial class MainViewModel : ObservableObject
                 target.UnreadCount++;
             }
             StatusText = $"Moved {label} to {target.DisplayName}.";
+            // Binning by hand is how the Clean up view learns. Rules and the agent never teach it.
+            if (target.Kind == FolderKind.Trash) await LearnTrashedAsync(target.Account, toMove);
         });
     }
 
@@ -1361,6 +1429,7 @@ public sealed partial class MainViewModel : ObservableObject
         Add("Commitments", "Open", OpenCommitmentsAsync, "What you owe and what others owe you");
         Add("Reminders", "Open", OpenRemindersAsync, ReminderCount > 0 ? $"{ReminderCount} waiting" : "");
         Add("Rules", "Open", OpenRulesAsync);
+        Add("Habits", "Open", OpenHabitsAsync, "Senders you usually bin: make rules, bin now, or ignore");
         AddSync(IsAgentPaneOpen ? "Hide agent pane" : "Show agent pane", "Open", ToggleAgentPane, shortcut: "Ctrl+Shift+A");
         Add("AI settings", "Open", OpenAiSettingsAsync);
         Add("Add account", "Open", AddAccountAsync);

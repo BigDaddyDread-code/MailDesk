@@ -66,6 +66,17 @@ public partial class MainWindow : FluentWindow
             var dialog = new NameDialog(title, prompt, initial) { Owner = this };
             return Task.FromResult(dialog.ShowDialog() == true ? dialog.Result : null);
         };
+        vm.RequestHabits = account =>
+        {
+            var habitsVm = new HabitsViewModel(_store, account)
+            {
+                RequestRule = (address, name) => { Activate(); return _vm.CreateTrashRuleForSenderAsync(address, name); },
+                RequestTrashNow = (acc, address) => _vm.TrashInboxFromSenderAsync(acc, address),
+                Changed = () => _ = _vm.RefreshViewCountsAsync(),
+            };
+            new HabitsWindow(habitsVm) { Owner = this }.Show();
+            return Task.CompletedTask;
+        };
         vm.RequestPalette = (commands, fallback) =>
         {
             var palette = new PaletteWindow(new PaletteViewModel(commands, fallback)) { Owner = this };

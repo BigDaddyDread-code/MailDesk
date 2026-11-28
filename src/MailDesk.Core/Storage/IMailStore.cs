@@ -66,6 +66,14 @@ public interface IMailStore
     Task<IReadOnlyList<ThreadFact>> GetThreadFactsAsync(long accountId, bool includeDone, CancellationToken ct = default);
     Task SetThreadFactDoneAsync(long factId, bool done, CancellationToken ct = default);
 
+    // Habits: what the user does with each sender's mail
+    /// <summary>Records that the user moved these messages to Trash themselves. Rules do not log; only hand actions teach.</summary>
+    Task LogTrashedAsync(long accountId, IEnumerable<MessageSummary> messages, long utcMs, CancellationToken ct = default);
+    /// <summary>Per-sender counts of binned versus read-and-kept, for senders binned at least <paramref name="minTrashed"/> times. Most binned first.</summary>
+    Task<IReadOnlyList<SenderHabit>> GetSenderHabitsAsync(long accountId, int minTrashed = 1, CancellationToken ct = default);
+    /// <summary>Stops (or resumes) suggesting a sender in the Clean up view.</summary>
+    Task SetSenderIgnoredAsync(long accountId, string fromAddress, bool ignored, CancellationToken ct = default);
+
     // Saved searches
     /// <summary>Every saved search in sidebar order.</summary>
     Task<IReadOnlyList<SavedSearch>> GetSavedSearchesAsync(CancellationToken ct = default);

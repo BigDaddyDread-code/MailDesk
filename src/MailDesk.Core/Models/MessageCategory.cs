@@ -22,4 +22,6 @@ public enum SmartView
     Notifications = 3,
     /// <summary>Every account's Inbox in one list. Rows carry the account name.</summary>
     AllInboxes = 4,
+    /// <summary>Inbox mail from senders the user nearly always moves to Trash, learned from what they did before.</summary>
+    CleanUp = 5,
 }
