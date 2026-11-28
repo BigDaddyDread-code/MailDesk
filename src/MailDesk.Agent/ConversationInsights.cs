@@ -25,7 +25,7 @@ public sealed class ThreadItem
     public bool IsYours => Who.Equals("you", StringComparison.OrdinalIgnoreCase) || Who.StartsWith("you ", StringComparison.OrdinalIgnoreCase);
     public bool HasSource => MessageId is not null;
     public bool CanAddTask => Kind == "commitment" && IsYours && !Done;
-    public string Icon => Kind switch { "decision" => "", "commitment" => "", _ => "" };
+    public string Icon => Kind switch { "decision" => "", "commitment" => "", _ => "" };
 
     /// <summary>One line under the text: who, due, done.</summary>
     public string Meta
@@ -79,6 +79,22 @@ public sealed class ConversationInsight
     }
 
     public string AnalysedText => AnalysedUtcMs == 0 ? "" : $"analysed {DateTimeOffset.FromUnixTimeMilliseconds(AnalysedUtcMs).ToLocalTime():d MMM HH:mm}";
+
+    /// <summary>The items as rows for the cross-conversation Commitments view.</summary>
+    public IReadOnlyList<ThreadFact> ToFacts(long accountId, string subject)
+    {
+        var facts = new List<ThreadFact>();
+        foreach (var i in Decisions.Concat(Commitments).Concat(OpenQuestions))
+        {
+            facts.Add(new ThreadFact
+            {
+                AccountId = accountId, ThreadKey = ThreadKey, Kind = i.Kind, Text = i.Text, Who = i.Who, IsYours = i.IsYours,
+                Due = i.Due, DueUtcMs = i.DueDate?.ToUnixTimeMilliseconds(), IsDone = i.Done, MessageId = i.MessageId,
+                Subject = subject, Basis = i.IsInferred ? "inferred" : "stated", AnalysedUtcMs = AnalysedUtcMs,
+            });
+        }
+        return facts;
+    }
 }
 
 /// <summary>

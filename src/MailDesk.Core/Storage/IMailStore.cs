@@ -55,6 +55,14 @@ public interface IMailStore
     // App settings (small key/value pairs; secrets are stored protected by the caller)
     Task<string?> GetSettingAsync(string key, CancellationToken ct = default);
     Task SetSettingAsync(string key, string? value, CancellationToken ct = default);
+    Task<IReadOnlyList<(string Key, string Value)>> GetSettingsByPrefixAsync(string prefix, CancellationToken ct = default);
+
+    // Facts extracted from conversations (decisions, commitments, open questions)
+    /// <summary>Replaces a thread's facts. A fact whose kind and text match an existing one keeps that one's done flag.</summary>
+    Task ReplaceThreadFactsAsync(long accountId, string threadKey, IEnumerable<ThreadFact> facts, CancellationToken ct = default);
+    /// <summary>All facts for the account: open first, dated before undated, soonest first.</summary>
+    Task<IReadOnlyList<ThreadFact>> GetThreadFactsAsync(long accountId, bool includeDone, CancellationToken ct = default);
+    Task SetThreadFactDoneAsync(long factId, bool done, CancellationToken ct = default);
 
     // Calendar
     Task<IReadOnlyList<CalendarItem>> GetCalendarItemsAsync(long accountId, long fromUtcMs, long toUtcMs, CancellationToken ct = default);

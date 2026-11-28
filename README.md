@@ -136,6 +136,16 @@ table under the thread key and shown again next time until the conversation grow
 
 Like Summarise and Ask, this runs only on your click and sends message text to the provider you chose.
 
+### Commitments across conversations
+
+Every analysis also writes its items to a local `thread_facts` table, and **Commitments** in the top bar lists them across
+the account in four sections: **You owe**, **Owed to you**, **Open questions** and **Decided**. Rows show the conversation
+they came from, the *inferred* tag where it applies, and a due badge (red when overdue). Tick a commitment or question off
+when it is settled; the tick is yours and survives re-analysing the conversation as long as the item's text is unchanged,
+while items the new analysis no longer finds are dropped. **Open** shows the source message; **Add task** turns a promise of
+yours into a task. The assistant reads the same table through `list_commitments`, so "what have I promised people?" works.
+Only analysed conversations are covered: this is a ledger of what you chose to extract, not a scan of the mailbox.
+
 ## Views: Priority, Waiting, Newsletters, Notifications
 
 The sidebar starts with four **Views** built from the local cache, one set per account, above the server folders:
@@ -260,7 +270,7 @@ act on while staying in control. Measured against five workspaces, this is the s
 | Inbox | What arrived and needs attention? | Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Unified inbox across accounts, snooze, keyboard command palette, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
 | Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant | Reminders when a wait passes a threshold, "nudge" drafts |
-| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, decisions / commitments / open questions per thread linked to their source message, `get_conversation` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, saved searches, a cross-thread view of every open commitment |
+| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, decisions / commitments / open questions per thread linked to their source message, Commitments ledger across conversations, `get_conversation` and `list_commitments` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, saved searches, automatic analysis of new replies in already-analysed threads |
 | Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
 
 Everything the AI does is proposal-only: it never sends, deletes or changes a record on its own, and the review pane shows
@@ -269,7 +279,7 @@ what it wants to do before anything happens. That rule holds for every item in t
 Engineering next steps, in order:
 
 1. Unified inbox and per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
-2. A Commitments view across all analysed conversations: everything you owe and everything owed to you, with due dates.
+2. Reminders when a Waiting item or a commitment passes its date, and a one-click "nudge" draft.
 3. Saved searches as sidebar views, built on the search operators above.
 4. Keyboard shortcuts and a command palette.
 5. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.

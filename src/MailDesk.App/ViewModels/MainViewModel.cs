@@ -80,6 +80,43 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Raised by the view to show the tasks window.</summary>
     public Func<Account, Task>? RequestTasks { get; set; }
 
+    /// <summary>Raised by the view to show the commitments window.</summary>
+    public Func<Account, Task>? RequestCommitments { get; set; }
+
+    [RelayCommand]
+    private async Task OpenCommitmentsAsync()
+    {
+        var account = CurrentAccount;
+        if (RequestCommitments is null || account is null) { StatusText = "Add an account first."; return; }
+        await RequestCommitments(account);
+    }
+
+    /// <summary>Conversations analysed before the facts table existed are loaded into it from their cached JSON, once.</summary>
+    private async Task BackfillFactsAsync()
+    {
+        const string flag = "facts.backfilled";
+        if (await _store.GetSettingAsync(flag) == "1") return;
+        try
+        {
+            foreach (var (key, json) in await _store.GetSettingsByPrefixAsync(ThreadInsightKeyPrefix))
+            {
+                var insight = ConversationAnalyst.Deserialize(json);
+                if (insight is null) continue;
+                var threadKey = key[ThreadInsightKeyPrefix.Length..];
+                foreach (var account in Accounts)
+                {
+                    var rows = await _store.GetThreadAsync(account.Id, threadKey);
+                    if (rows.Count == 0) continue;
+                    insight.ThreadKey = threadKey;
+                    await _store.ReplaceThreadFactsAsync(account.Id, threadKey, insight.ToFacts(account.Id, rows[0].Subject));
+                    break;
+                }
+            }
+            await _store.SetSettingAsync(flag, "1");
+        }
+        catch { /* best effort; the next analysis writes facts directly */ }
+    }
+
     [RelayCommand]
     private async Task OpenTasksAsync()
     {
@@ -279,6 +316,7 @@ public sealed partial class MainViewModel : ObservableObject
         _loadingSettings = true;
         ShowConversations = await _store.GetSettingAsync(ConversationsKey) == "1";
         _loadingSettings = false;
+        _ = BackfillFactsAsync();
         SelectedFolder ??= Folders.FirstOrDefault(f => f.Kind == FolderKind.Inbox) ?? Folders.FirstOrDefault();
         var first = Accounts.FirstOrDefault();
         WorkspaceTitle = first?.Name ?? "MailDesk";
@@ -424,6 +462,7 @@ public sealed partial class MainViewModel : ObservableObject
             StatusText = "Analysing the conversation...";
             var insight = await ConversationAnalyst.AnalyzeAsync(client, account.Name, account.Email, rows, bodies);
             await _store.SetSettingAsync(ThreadInsightKeyPrefix + insight.ThreadKey, ConversationAnalyst.Serialize(insight));
+            await _store.ReplaceThreadFactsAsync(account.Id, insight.ThreadKey, insight.ToFacts(account.Id, rows[0].Subject));
             if (ReferenceEquals(message, ReaderMessage) || ReaderMessage?.ThreadKey == insight.ThreadKey) ThreadInsight = insight;
             StatusText = $"Conversation analysed with {insight.ModelNote}: {insight.Counts}.";
         }

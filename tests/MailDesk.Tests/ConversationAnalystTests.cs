@@ -70,6 +70,20 @@ public sealed class ConversationAnalystTests
         Assert.Equal("1 decision, 2 commitments, 1 open question", insight.Counts);
         Assert.Single(insight.Uncertain);
 
+        // Facts for the cross-conversation view carry kind, owner, due date and source.
+        insight.ThreadKey = "<a@pat>";
+        var facts = insight.ToFacts(7, "Deck quote");
+        Assert.Equal(4, facts.Count);
+        var contract = facts.Single(f => f.Text == "Send the contract");
+        Assert.Equal("commitment", contract.Kind);
+        Assert.False(contract.IsYours);
+        Assert.True(contract.IsInferred);
+        Assert.NotNull(contract.DueUtcMs);
+        Assert.Equal(11, contract.MessageId);
+        Assert.Equal("Deck quote", contract.Subject);
+        Assert.True(facts.Single(f => f.Text == "Pay the deposit").IsYours);
+        Assert.Equal("question", facts.Single(f => f.Text == "Which timber?").Kind);
+
         // Round trip through the cache keeps kinds, so CanAddTask still works after reload.
         var again = ConversationAnalyst.Deserialize(ConversationAnalyst.Serialize(insight));
         Assert.NotNull(again);

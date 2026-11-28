@@ -43,6 +43,12 @@ public partial class MainWindow : FluentWindow
             new TasksWindow(tasksVm) { Owner = this }.Show();
             return Task.CompletedTask;
         };
+        vm.RequestCommitments = account =>
+        {
+            var commitmentsVm = new CommitmentsViewModel(_store, account) { RequestOpenMessage = id => { Activate(); return _vm.OpenMessageAsync(id); } };
+            new CommitmentsWindow(commitmentsVm) { Owner = this }.Show();
+            return Task.CompletedTask;
+        };
         vm.RequestRuleEditor = ShowRuleEditorAsync;
         vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;

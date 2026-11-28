@@ -73,10 +73,16 @@
                                 <TextBlock Text="Calendar" />
                             </StackPanel>
                         </Button>
-                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenTasksCommand}">
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenTasksCommand}" Margin="0,0,6,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE73A;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
                                 <TextBlock Text="Tasks" />
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenCommitmentsCommand}" ToolTip="What you owe, what is owed to you and what is still open, across every analysed conversation">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Commitments" />
                             </StackPanel>
                         </Button>
                     </StackPanel>

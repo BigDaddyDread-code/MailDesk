@@ -185,6 +185,24 @@ public sealed class SqliteMailStore : IMailStore
             CompletedUtcMs INTEGER
         );
         CREATE INDEX IF NOT EXISTS ix_tasks_account ON tasks(AccountId, IsDone, DueUtcMs);
+        CREATE TABLE IF NOT EXISTS thread_facts (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            AccountId INTEGER NOT NULL REFERENCES accounts(Id) ON DELETE CASCADE,
+            ThreadKey TEXT NOT NULL,
+            Kind TEXT NOT NULL,
+            Text TEXT NOT NULL,
+            Who TEXT NOT NULL DEFAULT '',
+            IsYours INTEGER NOT NULL DEFAULT 0,
+            Due TEXT NOT NULL DEFAULT '',
+            DueUtcMs INTEGER,
+            IsDone INTEGER NOT NULL DEFAULT 0,
+            MessageId INTEGER,
+            Subject TEXT NOT NULL DEFAULT '',
+            Basis TEXT NOT NULL DEFAULT 'stated',
+            AnalysedUtcMs INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS ix_thread_facts_account ON thread_facts(AccountId, IsDone, DueUtcMs);
+        CREATE INDEX IF NOT EXISTS ix_thread_facts_thread ON thread_facts(ThreadKey);
         """;
 
     // ---------------- Tasks ----------------
@@ -368,6 +386,66 @@ public sealed class SqliteMailStore : IMailStore
     {
         using var conn = Open();
         return await conn.ExecuteScalarAsync<string?>("SELECT Value FROM settings WHERE Key=@key", new { key });
+    }
+
+    public async Task<IReadOnlyList<(string Key, string Value)>> GetSettingsByPrefixAsync(string prefix, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var rows = await conn.QueryAsync<(string Key, string Value)>(
+            "SELECT Key, Value FROM settings WHERE Value IS NOT NULL AND Key LIKE @like ESCAPE '\\' ORDER BY Key",
+            new { like = EscapeLike(prefix) + "%" });
+        return rows.ToList();
+    }
+
+    // ---------------- Facts from conversations ----------------
+
+    public async Task ReplaceThreadFactsAsync(long accountId, string threadKey, IEnumerable<ThreadFact> facts, CancellationToken ct = default)
+    {
+        var list = facts.ToList();
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            using var tx = conn.BeginTransaction();
+            var done = (await conn.QueryAsync<(string Kind, string Text)>(
+                "SELECT Kind, Text FROM thread_facts WHERE AccountId=@accountId AND ThreadKey=@threadKey AND IsDone=1",
+                new { accountId, threadKey }, tx)).ToHashSet();
+            await conn.ExecuteAsync("DELETE FROM thread_facts WHERE AccountId=@accountId AND ThreadKey=@threadKey", new { accountId, threadKey }, tx);
+            foreach (var f in list)
+            {
+                f.AccountId = accountId;
+                f.ThreadKey = threadKey;
+                if (done.Contains((f.Kind, f.Text))) f.IsDone = true;
+                f.Id = await conn.ExecuteScalarAsync<long>("""
+                    INSERT INTO thread_facts (AccountId, ThreadKey, Kind, Text, Who, IsYours, Due, DueUtcMs, IsDone, MessageId, Subject, Basis, AnalysedUtcMs)
+                    VALUES (@AccountId, @ThreadKey, @Kind, @Text, @Who, @IsYours, @Due, @DueUtcMs, @IsDone, @MessageId, @Subject, @Basis, @AnalysedUtcMs);
+                    SELECT last_insert_rowid();
+                    """, f, tx);
+            }
+            tx.Commit();
+        }
+        finally { _writeLock.Release(); }
+    }
+
+    public async Task<IReadOnlyList<ThreadFact>> GetThreadFactsAsync(long accountId, bool includeDone, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var rows = await conn.QueryAsync<ThreadFact>(
+            "SELECT * FROM thread_facts WHERE AccountId=@accountId" + (includeDone ? "" : " AND IsDone=0") +
+            " ORDER BY IsDone, CASE WHEN DueUtcMs IS NULL THEN 1 ELSE 0 END, DueUtcMs, AnalysedUtcMs DESC, Id",
+            new { accountId });
+        return rows.ToList();
+    }
+
+    public async Task SetThreadFactDoneAsync(long factId, bool done, CancellationToken ct = default)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            using var conn = Open();
+            await conn.ExecuteAsync("UPDATE thread_facts SET IsDone=@done WHERE Id=@factId", new { factId, done });
+        }
+        finally { _writeLock.Release(); }
     }
 
     public async Task SetSettingAsync(string key, string? value, CancellationToken ct = default)

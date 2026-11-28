@@ -59,7 +59,9 @@ public sealed class MailboxToolbox
             }, additionalProperties = false }),
         new("list_tasks", "The user's to-do list: open tasks with due dates, or everything with include_done.",
             new { type = "object", properties = new { include_done = new { type = "boolean" } }, additionalProperties = false }),
-        new("list_waiting", "Mail the user sent that nobody has answered yet (who owes them a reply), newest first, with how many days each has waited. Also accepts view = priority, newsletters or notifications to list that smart view instead.",
+        new("list_commitments", "Decisions, commitments and open questions pulled from conversations the user has analysed: what they owe (owner 'you'), what others owe them, with due dates and the message each came from. Only covers analysed conversations.",
+            new { type = "object", properties = new { include_done = new { type = "boolean" } }, additionalProperties = false }),
+        new("list_waiting","Mail the user sent that nobody has answered yet (who owes them a reply), newest first, with how many days each has waited. Also accepts view = priority, newsletters or notifications to list that smart view instead.",
             new { type = "object", properties = new
             {
                 view = new { type = "string", description = "waiting (default), priority, newsletters or notifications" },
@@ -104,6 +106,7 @@ public sealed class MailboxToolbox
                 "list_events" => await EventsAsync(Str(input, "from_date"), Str(input, "to_date"), ct),
                 "list_tasks" => await TasksAsync(Bool(input, "include_done"), ct),
                 "list_waiting" => await ViewAsync(Str(input, "view"), Int(input, "limit", 30, 100), ct),
+                "list_commitments" => await CommitmentsAsync(Bool(input, "include_done"), ct),
                 "suggest_event" => SuggestEvent(input),
                 "suggest_task" => SuggestTask(input),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown tool '{name}'." }),
@@ -121,6 +124,24 @@ public sealed class MailboxToolbox
         var hits = await _store.SearchAsync(query, _account.Id, null, limit, ct);
         Remember(hits);
         return JsonSerializer.Serialize(new { total = hits.Count, messages = hits.Select(Row) }, Json);
+    }
+
+    private async Task<string> CommitmentsAsync(bool includeDone, CancellationToken ct)
+    {
+        var facts = await _store.GetThreadFactsAsync(_account.Id, includeDone, ct);
+        object Row(ThreadFact f) => new
+        {
+            f.Kind, f.Text, who = f.IsYours ? "you" : f.Who, due = string.IsNullOrEmpty(f.Due) ? null : f.Due, done = f.IsDone,
+            basis = f.Basis, conversation = f.Subject, message_id = f.MessageId, overdue = f.IsOverdue ? true : (bool?)null,
+        };
+        return JsonSerializer.Serialize(new
+        {
+            analysed_conversations = facts.Select(f => f.ThreadKey).Distinct().Count(),
+            you_owe = facts.Where(f => f.Kind == "commitment" && f.IsYours).Select(Row),
+            owed_to_you = facts.Where(f => f.Kind == "commitment" && !f.IsYours).Select(Row),
+            open_questions = facts.Where(f => f.Kind == "question").Select(Row),
+            decisions = facts.Where(f => f.Kind == "decision").Select(Row),
+        }, Json);
     }
 
     private async Task<string> ViewAsync(string? viewName, int limit, CancellationToken ct)
@@ -336,7 +357,8 @@ public sealed class MailboxAssistant
         Answer questions about their mail, calendar and to-do list by using the tools: search first, read a message with
         get_message only when the preview is not enough, get_conversation for the whole exchange behind a message (what was
         asked, what was agreed, whether they already replied), list_events for what is coming up, list_tasks for what is
-        owed, list_waiting for who has not replied to them, and keep tool calls few. When summarising a conversation,
+        owed, list_waiting for who has not replied to them, list_commitments for what they promised and what others promised
+        them in conversations they analysed, and keep tool calls few. When summarising a conversation,
         separate what was actually said from what you infer, and say what is still open. Use search operators (from:, to:, after:,
         has:attachment) instead of scanning lists when the question names a person, a date range or attachments. Answer in plain text, briefly and specifically, quoting dates, amounts and names from the
         mail. Mention which message something came from by sender and subject so the person can find it. If the mail does

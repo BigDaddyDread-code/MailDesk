@@ -276,6 +276,50 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Thread_facts_replace_per_thread_keep_done_and_order_by_due()
+    {
+        var (account, _) = await SeedAsync();
+        var tomorrow = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds();
+        var lastWeek = DateTimeOffset.UtcNow.AddDays(-7).ToUnixTimeMilliseconds();
+        await _store.ReplaceThreadFactsAsync(account.Id, "<t1>",
+        [
+            new ThreadFact { Kind = "commitment", Text = "Send the contract", Who = "Pat", Due = "2026-12-05", DueUtcMs = tomorrow, Subject = "Deck quote" },
+            new ThreadFact { Kind = "commitment", Text = "Pay the deposit", Who = "you", IsYours = true, DueUtcMs = lastWeek, Subject = "Deck quote" },
+            new ThreadFact { Kind = "decision", Text = "Build the deck", Who = "you", Subject = "Deck quote" },
+        ]);
+        await _store.ReplaceThreadFactsAsync(account.Id, "<t2>",
+        [
+            new ThreadFact { Kind = "question", Text = "Which timber?", Who = "Pat", Subject = "Timber" },
+        ]);
+
+        var all = await _store.GetThreadFactsAsync(account.Id, includeDone: true);
+        Assert.Equal(4, all.Count);
+        Assert.Equal("Pay the deposit", all[0].Text); // dated items first, soonest (here: overdue) first
+        Assert.True(all[0].IsOverdue);
+        Assert.Equal("Send the contract", all[1].Text);
+        Assert.False(all[1].IsOverdue);
+
+        // Mark one done; re-analysing the thread keeps that flag for the unchanged item and drops items that vanished.
+        await _store.SetThreadFactDoneAsync(all[0].Id, true);
+        await _store.ReplaceThreadFactsAsync(account.Id, "<t1>",
+        [
+            new ThreadFact { Kind = "commitment", Text = "Pay the deposit", Who = "you", IsYours = true, Subject = "Deck quote" },
+            new ThreadFact { Kind = "commitment", Text = "Send the signed contract", Who = "Pat", Subject = "Deck quote" },
+        ]);
+        var open = await _store.GetThreadFactsAsync(account.Id, includeDone: false);
+        Assert.Equal(["Send the signed contract", "Which timber?"], open.Select(f => f.Text).OrderBy(t => t).ToArray());
+        var withDone = await _store.GetThreadFactsAsync(account.Id, includeDone: true);
+        Assert.True(withDone.Single(f => f.Text == "Pay the deposit").IsDone);
+        Assert.DoesNotContain(withDone, f => f.Text == "Build the deck"); // gone from the new analysis
+
+        // Settings by prefix, used to backfill facts from cached analyses.
+        await _store.SetSettingAsync("thread.insight:<t1>", "{}");
+        await _store.SetSettingAsync("thread.insight:<t2>", "{}");
+        await _store.SetSettingAsync("other", "x");
+        Assert.Equal(2, (await _store.GetSettingsByPrefixAsync("thread.insight:")).Count);
+    }
+
+    [Fact]
     public async Task Update_flags_and_sender_stats()
     {
         var (_, folder) = await SeedAsync();
