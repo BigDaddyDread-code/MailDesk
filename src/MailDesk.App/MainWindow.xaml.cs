@@ -104,6 +104,17 @@ public partial class MainWindow : FluentWindow
     {
         if (e.PropertyName == nameof(MainViewModel.ReaderHtml) && _readerReady)
             Reader.NavigateToString(_vm.ReaderHtml);
+        else if (e.PropertyName == nameof(MainViewModel.GroupFoldersByAccount))
+            ApplyFolderGrouping();
+    }
+
+    /// <summary>With two or more accounts the folder list gets a header per account; with one it stays flat.</summary>
+    private void ApplyFolderGrouping()
+    {
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(_vm.Folders);
+        if (view is null) return;
+        view.GroupDescriptions.Clear();
+        if (_vm.GroupFoldersByAccount) view.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription("Account.Name"));
     }
 
     private void QuestionBox_KeyDown(object sender, KeyEventArgs e)

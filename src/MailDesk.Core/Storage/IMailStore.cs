@@ -44,6 +44,8 @@ public interface IMailStore
     /// Rows carry <see cref="MessageSummary.FolderName"/>; Waiting rows also set ShowRecipients and a Badge.
     /// </summary>
     Task<IReadOnlyList<MessageSummary>> GetSmartViewAsync(long accountId, SmartView view, int limit = 500, int waitingDays = 45, CancellationToken ct = default);
+    /// <summary>Every account's Inbox messages, newest first, with FolderName and AccountName filled.</summary>
+    Task<IReadOnlyList<MessageSummary>> GetUnifiedInboxAsync(int limit = 500, CancellationToken ct = default);
 
     // Bodies
     Task<MessageBody?> GetBodyAsync(long messageId, CancellationToken ct = default);

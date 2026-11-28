@@ -43,6 +43,8 @@ public sealed class MessageSummary
     public string FolderName { get; set; } = "";
     /// <summary>Short status shown as a badge in the list, e.g. how long a sent message has waited. Not stored.</summary>
     public string Badge { get; set; } = "";
+    /// <summary>Account name, filled by the unified inbox when more than one account is set up. Not stored.</summary>
+    public string AccountName { get; set; } = "";
     /// <summary>True when the row should lead with who the message went to rather than who sent it (Sent folder, Waiting view). Not stored.</summary>
     public bool ShowRecipients { get; set; }
 

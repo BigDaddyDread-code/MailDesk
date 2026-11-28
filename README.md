@@ -164,8 +164,14 @@ listed again with **Show snoozed**. On start the status bar says how many remind
 
 ## Views: Priority, Waiting, Newsletters, Notifications
 
-The sidebar starts with four **Views** built from the local cache, one set per account, above the server folders:
+The sidebar starts with **Views** built from the local cache, above the server folders. **All inboxes** comes first and is
+account-wide; the other four come one set per account:
 
+- **All inboxes**: every account's Inbox in one list, newest first. With two or more accounts each row carries the account
+  name, the folder list grows a header per account, and a search started from this view covers every account. Every action
+  on a row (open, reply, flag, trash, drag to a folder, summarise, tasks) resolves the row's own account from its folder, so a
+  reply goes out from the address the mail came to. Dragging onto a folder moves only the rows that belong to that folder's
+  account and says so; Trash sends each row to its own account's Trash. **Sync** on this view refreshes every Inbox.
 - **Priority**: Inbox mail from people. Every message is classified at sync time from its headers, locally and without a
   model: `List-Unsubscribe`, `List-Id` or `Precedence: bulk` marks a newsletter; `Auto-Submitted`, bounce and no-reply
   style senders (and system senders with transactional subjects such as receipts, codes and reminders) mark a notification;
@@ -283,7 +289,7 @@ act on while staying in control. Measured against five workspaces, this is the s
 
 | Workspace | Question | Have | Missing |
 |---|---|---|---|
-| Inbox | What arrived and needs attention? | Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Unified inbox across accounts, snooze, keyboard command palette, thread-wide move and delete |
+| Inbox | What arrived and needs attention? | All inboxes across accounts, Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Snooze, keyboard command palette, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
 | Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant, reminders after a threshold with one-click nudge drafts, snooze and dismiss | Reminders as Windows notifications when the app is in the background |
 | Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, decisions / commitments / open questions per thread linked to their source message, Commitments ledger across conversations, `get_conversation` and `list_commitments` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, saved searches, automatic analysis of new replies in already-analysed threads |
@@ -294,7 +300,7 @@ what it wants to do before anything happens. That rule holds for every item in t
 
 Engineering next steps, in order:
 
-1. Unified inbox and per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
+1. Per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
 2. Saved searches as sidebar views, built on the search operators above.
 3. Windows notifications for new priority mail and reminders while the app is in the background.
 4. Keyboard shortcuts and a command palette.

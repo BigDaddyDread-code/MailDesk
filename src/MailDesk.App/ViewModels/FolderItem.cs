@@ -31,11 +31,14 @@ public sealed partial class FolderItem : ObservableObject
     public MailFolder Folder { get; }
     public SmartView? View { get; }
     public bool IsView => View is not null;
+    /// <summary>The cross-account inbox. Its Account is only an anchor; rows resolve their own account by folder.</summary>
+    public bool IsUnified => View == SmartView.AllInboxes;
 
     public string DisplayName => Folder.DisplayName;
     public FolderKind Kind => Folder.Kind;
     public string Icon => View switch
     {
+        SmartView.AllInboxes => "",
         SmartView.Priority => "",
         SmartView.Waiting => "",
         SmartView.Newsletters => "",
@@ -54,6 +57,7 @@ public sealed partial class FolderItem : ObservableObject
 
     public string Description => View switch
     {
+        SmartView.AllInboxes => "Every account's Inbox in one list",
         SmartView.Priority => "Inbox mail from people: newsletters and notifications filtered out",
         SmartView.Waiting => "Mail you sent that has not been answered",
         SmartView.Newsletters => "Mailing lists and marketing",
@@ -63,6 +67,7 @@ public sealed partial class FolderItem : ObservableObject
 
     public static string ViewName(SmartView view) => view switch
     {
+        SmartView.AllInboxes => "All inboxes",
         SmartView.Priority => "Priority",
         SmartView.Waiting => "Waiting",
         SmartView.Newsletters => "Newsletters",

@@ -902,6 +902,23 @@ public sealed class SqliteMailStore : IMailStore
         }
     }
 
+    public async Task<IReadOnlyList<MessageSummary>> GetUnifiedInboxAsync(int limit = 500, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var rows = await conn.QueryAsync<MessageSummary>("""
+            SELECT m.*, fo.DisplayName AS FolderName, a.Name AS AccountName, ts.Cnt AS ThreadCount, ts.Unread AS ThreadUnread
+            FROM messages m
+            JOIN folders fo ON fo.Id = m.FolderId
+            JOIN accounts a ON a.Id = fo.AccountId
+            LEFT JOIN (SELECT x.ThreadKey, xf.AccountId, COUNT(*) AS Cnt, SUM(CASE WHEN x.IsRead=0 THEN 1 ELSE 0 END) AS Unread
+                       FROM messages x JOIN folders xf ON xf.Id = x.FolderId
+                       WHERE xf.Kind NOT IN (4, 5) GROUP BY xf.AccountId, x.ThreadKey) ts ON ts.ThreadKey = m.ThreadKey AND ts.AccountId = fo.AccountId
+            WHERE fo.Kind = @inbox
+            ORDER BY m.DateUtcMs DESC LIMIT @limit
+            """, new { inbox = (int)FolderKind.Inbox, limit });
+        return rows.ToList();
+    }
+
     /// <summary>
     /// Sent mail nobody has answered. A reply is any later message in a non-Sent folder of the account that names the sent
     /// message in In-Reply-To or References, or that comes from one of its recipients with the same normalised subject.

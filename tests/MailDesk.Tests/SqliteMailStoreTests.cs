@@ -320,6 +320,33 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Unified_inbox_merges_every_accounts_inbox_with_account_names()
+    {
+        var (home, homeInbox) = await SeedAsync();
+        var work = new Account { Name = "Work", Email = "w@example.org", ImapHost = "imap.example.org", Username = "w", ProtectedPassword = "x" };
+        await _store.UpsertAccountAsync(work);
+        var workInbox = new MailFolder { AccountId = work.Id, FullName = "INBOX", DisplayName = "Inbox", Kind = FolderKind.Inbox };
+        var workArchive = new MailFolder { AccountId = work.Id, FullName = "Archive", DisplayName = "Archive", Kind = FolderKind.Archive };
+        await _store.UpsertFolderAsync(workInbox);
+        await _store.UpsertFolderAsync(workArchive);
+        await _store.UpsertMessagesAsync(
+        [
+            new MessageSummary { FolderId = homeInbox.Id, Uid = 1, MessageId = "<h1>", Subject = "Home one", FromAddress = "a@x.test", DateUtcMs = 1000 },
+            new MessageSummary { FolderId = workInbox.Id, Uid = 1, MessageId = "<w1>", Subject = "Work one", FromAddress = "b@x.test", DateUtcMs = 3000 },
+            new MessageSummary { FolderId = workInbox.Id, Uid = 2, MessageId = "<w2>", Subject = "Re: Work one", FromAddress = "c@x.test", InReplyTo = "<w1>", DateUtcMs = 4000 },
+            new MessageSummary { FolderId = workArchive.Id, Uid = 1, MessageId = "<wa>", Subject = "Archived", FromAddress = "d@x.test", DateUtcMs = 5000 },
+        ]);
+
+        var unified = await _store.GetUnifiedInboxAsync();
+        Assert.Equal(["Re: Work one", "Work one", "Home one"], unified.Select(m => m.Subject).ToArray()); // newest first, Archive left out
+        Assert.Equal("Work", unified[0].AccountName);
+        Assert.Equal(home.Name, unified[2].AccountName);
+        Assert.All(unified, m => Assert.Equal("Inbox", m.FolderName));
+        Assert.Equal(2, unified[0].ThreadCount); // thread counts are per account
+        Assert.Equal(1, unified[2].ThreadCount);
+    }
+
+    [Fact]
     public async Task Update_flags_and_sender_stats()
     {
         var (_, folder) = await SeedAsync();

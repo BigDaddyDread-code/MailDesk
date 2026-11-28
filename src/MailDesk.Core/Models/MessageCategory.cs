@@ -20,4 +20,6 @@ public enum SmartView
     Waiting = 1,
     Newsletters = 2,
     Notifications = 3,
+    /// <summary>Every account's Inbox in one list. Rows carry the account name.</summary>
+    AllInboxes = 4,
 }

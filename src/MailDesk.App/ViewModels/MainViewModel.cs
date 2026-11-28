@@ -43,6 +43,8 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private MessageSummary? _readerMessage;
     /// <summary>One row per conversation in folder lists (newest message of each thread). Persisted as a setting.</summary>
     [ObservableProperty] private bool _showConversations;
+    /// <summary>True with two or more accounts: the sidebar folder list gets an account header per group.</summary>
+    [ObservableProperty] private bool _groupFoldersByAccount;
     private bool _loadingSettings;
 
     /// <summary>The conversation around <see cref="ReaderMessage"/>, oldest first, across folders.</summary>
@@ -193,7 +195,7 @@ public sealed partial class MainViewModel : ObservableObject
             while (subject.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) subject = subject[prefix.Length..].Trim();
         var task = new TaskItem
         {
-            AccountId = SelectedFolder.Account.Id,
+            AccountId = AccountOf(message).Id,
             Title = subject.Length == 0 ? $"Follow up with {message.FromDisplay}" : subject,
             Notes = $"From {message.FromDisplay}, {message.Date:d MMM yyyy}",
             SourceMessageId = message.Id,
@@ -239,7 +241,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(body.CalendarIcs) || SelectedFolder is null) return;
         try
         {
-            var parsed = Calendar.IcsCodec.Parse(body.CalendarIcs, SelectedFolder.Account.Id, message.Id).FirstOrDefault();
+            var parsed = Calendar.IcsCodec.Parse(body.CalendarIcs, AccountOf(message).Id, message.Id).FirstOrDefault();
             if (parsed is null) return;
             // Prefer what we already know (our response) but show the newest details from this message.
             var known = await _store.GetCalendarItemAsync(parsed.AccountId, parsed.Uid);
@@ -281,7 +283,7 @@ public sealed partial class MainViewModel : ObservableObject
     private async Task RespondAsync(RsvpStatus response)
     {
         if (Invite is null || SelectedFolder is null || RequestSender is null) return;
-        var account = SelectedFolder.Account;
+        var account = AccountOf(ReaderMessage);
         var invite = Invite;
         await RunBusyAsync($"Sending response to {invite.OrganizerName}...", async () =>
         {
@@ -340,7 +342,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (ReaderMessage is null || SelectedFolder is null) return;
         var body = await _store.GetBodyAsync(ReaderMessage.Id);
-        await OpenComposeAsync(Core.Text.ComposeBuilder.Reply(ReaderMessage, body, SelectedFolder.Account.Email, replyAll));
+        await OpenComposeAsync(Core.Text.ComposeBuilder.Reply(ReaderMessage, body, AccountOf(ReaderMessage).Email, replyAll));
     }
 
     private async Task OpenComposeAsync(OutgoingMessage seed)
@@ -355,7 +357,19 @@ public sealed partial class MainViewModel : ObservableObject
             await RunBusyAsync($"Refreshing {SelectedFolder.DisplayName}...", () => SyncFolderAsync(SelectedFolder));
     }
 
-    private Account? CurrentAccount => SelectedFolder?.Account ?? Accounts.FirstOrDefault();
+    /// <summary>The account for new work: the open message's account (rows in All inboxes differ), else the selected folder's, else the first.</summary>
+    private Account? CurrentAccount => ReaderMessage is { } m ? AccountOf(m) : SelectedFolder?.Account ?? Accounts.FirstOrDefault();
+
+    /// <summary>The account a message belongs to, by its folder. Falls back to the selected folder's account for rows not in the sidebar.</summary>
+    private Account AccountOf(MessageSummary? message)
+    {
+        if (message is not null)
+        {
+            var folder = Folders.FirstOrDefault(f => f.Folder.Id == message.FolderId);
+            if (folder is not null) return folder.Account;
+        }
+        return SelectedFolder?.Account ?? Accounts.First();
+    }
 
     public async Task LoadAsync()
     {
@@ -367,9 +381,12 @@ public sealed partial class MainViewModel : ObservableObject
             Accounts.Add(a);
             foreach (var f in await _store.GetFoldersAsync(a.Id))
                 Folders.Add(new FolderItem(a, f));
-            foreach (var v in Enum.GetValues<SmartView>())
+            foreach (var v in Enum.GetValues<SmartView>().Where(v => v != SmartView.AllInboxes))
                 Views.Add(new FolderItem(a, v));
         }
+        // One cross-account inbox at the top, anchored to the first account.
+        if (Accounts.Count > 0) Views.Insert(0, new FolderItem(Accounts[0], SmartView.AllInboxes));
+        GroupFoldersByAccount = Accounts.Count > 1;
         _ = RefreshViewCountsAsync();
         _loadingSettings = true;
         ShowConversations = await _store.GetSettingAsync(ConversationsKey) == "1";
@@ -418,12 +435,19 @@ public sealed partial class MainViewModel : ObservableObject
                 }
             }
 
-            var rows = await _store.GetSmartViewAsync(SelectedFolder.Account.Id, view);
-            foreach (var m in rows) Messages.Add(m);
+            var rows = view == SmartView.AllInboxes
+                ? await _store.GetUnifiedInboxAsync()
+                : await _store.GetSmartViewAsync(SelectedFolder.Account.Id, view);
+            foreach (var m in rows)
+            {
+                if (Accounts.Count < 2) m.AccountName = ""; // one account: the badge would only repeat itself
+                Messages.Add(m);
+            }
             var unread = rows.Count(m => !m.IsRead);
             ListSubtitle = view switch
             {
                 SmartView.Waiting => rows.Count == 0 ? "Nobody owes you a reply." : $"{rows.Count} sent message{(rows.Count == 1 ? "" : "s")} waiting for a reply",
+                SmartView.AllInboxes => $"{rows.Count} messages across {Accounts.Count} account{(Accounts.Count == 1 ? "" : "s")}, {unread} unread",
                 _ => $"{rows.Count} messages, {unread} unread. {SelectedFolder.Description}",
             };
             SelectedFolder.UnreadCount = view == SmartView.Waiting ? rows.Count : unread;
@@ -450,7 +474,8 @@ public sealed partial class MainViewModel : ObservableObject
         {
             try
             {
-                if (v.View == SmartView.Priority) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.Priority)).Count(m => !m.IsRead);
+                if (v.View == SmartView.AllInboxes) v.UnreadCount = Folders.Where(f => f.Kind == FolderKind.Inbox).Sum(f => f.UnreadCount);
+                else if (v.View == SmartView.Priority) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.Priority)).Count(m => !m.IsRead);
                 else if (v.View == SmartView.Waiting) v.UnreadCount = (await _store.GetSmartViewAsync(v.Account.Id, SmartView.Waiting)).Count;
             }
             catch { /* a count is decoration; never let it break loading */ }
@@ -461,6 +486,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The server folders a smart view is built from, so Sync can refresh them.</summary>
     private IEnumerable<FolderItem> SourceFoldersFor(FolderItem view)
     {
+        if (view.IsUnified) return Folders.Where(f => f.Kind == FolderKind.Inbox).ToList();
         var kinds = view.View == SmartView.Waiting ? new[] { FolderKind.Sent, FolderKind.Inbox } : [FolderKind.Inbox];
         return kinds.Select(k => Folders.FirstOrDefault(f => f.Account.Id == view.Account.Id && f.Kind == k)).Where(f => f is not null)!;
     }
@@ -506,7 +532,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (ReaderMessage is null || SelectedFolder is null || RequestProtector is null || _threadRows.Count == 0) return;
         var message = ReaderMessage;
-        var account = SelectedFolder.Account;
+        var account = AccountOf(ReaderMessage);
         var rows = _threadRows;
         IsAnalysingThread = true;
         try
@@ -551,7 +577,7 @@ public sealed partial class MainViewModel : ObservableObject
         var source = item.MessageId is { } id ? _threadRows.FirstOrDefault(m => m.Id == id) : null;
         var task = new TaskItem
         {
-            AccountId = SelectedFolder.Account.Id, Title = item.Text, DueUtcMs = item.DueDate?.ToUnixTimeMilliseconds(),
+            AccountId = AccountOf(ReaderMessage).Id, Title = item.Text, DueUtcMs = item.DueDate?.ToUnixTimeMilliseconds(),
             Notes = source is null ? "Promised in a conversation" : $"Promised to {source.ToAddresses}",
             SourceMessageId = source?.Id, SourceSubject = source?.Subject ?? ReaderMessage?.Subject ?? "",
             CreatedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
@@ -567,7 +593,7 @@ public sealed partial class MainViewModel : ObservableObject
         ThreadInsight = null;
         _threadRows = [];
         if (SelectedFolder is null || string.IsNullOrEmpty(message.ThreadKey)) return;
-        var account = SelectedFolder.Account;
+        var account = AccountOf(ReaderMessage);
         var rows = await _store.GetThreadAsync(account.Id, message.ThreadKey);
         if (!ReferenceEquals(message, ReaderMessage) || rows.Count < 2) return;
         _threadRows = rows;
@@ -602,7 +628,7 @@ public sealed partial class MainViewModel : ObservableObject
             Insight = null;
             HasBlockedImages = false;
             _ = LoadThreadAsync(message);
-            var body = await _sync.FetchBodyAsync(SelectedFolder.Account, message);
+            var body = await _sync.FetchBodyAsync(AccountOf(message), message);
             if (!ReferenceEquals(message, ReaderMessage)) return; // user moved on while the body was downloading
             _currentBody = body;
             var allowImages = await IsSenderAllowedImagesAsync(message.FromAddress);
@@ -612,7 +638,7 @@ public sealed partial class MainViewModel : ObservableObject
             if (!message.IsRead)
             {
                 message.IsRead = true;
-                await _sync.SetFlagsAsync(SelectedFolder.Account, message, isRead: true);
+                await _sync.SetFlagsAsync(AccountOf(message), message, isRead: true);
                 var home = Folders.FirstOrDefault(f => f.Folder.Id == message.FolderId) ?? SelectedFolder;
                 home.UnreadCount = Math.Max(0, home.UnreadCount - 1);
                 if (SelectedFolder.IsView && !ReferenceEquals(home, SelectedFolder) && SelectedFolder.View != SmartView.Waiting)
@@ -644,7 +670,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (ReaderMessage is null || SelectedFolder is null || RequestProtector is null) return;
         var message = ReaderMessage;
-        var account = SelectedFolder.Account;
+        var account = AccountOf(ReaderMessage);
         IsSummarising = true;
         try
         {
@@ -670,7 +696,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(item) || ReaderMessage is null || SelectedFolder is null) return;
         await _store.UpsertTaskAsync(new TaskItem
         {
-            AccountId = SelectedFolder.Account.Id, Title = item.Trim(), Notes = $"From {ReaderMessage.FromDisplay}",
+            AccountId = AccountOf(ReaderMessage).Id, Title = item.Trim(), Notes = $"From {ReaderMessage.FromDisplay}",
             SourceMessageId = ReaderMessage.Id, SourceSubject = ReaderMessage.Subject,
         });
         StatusText = $"Task added: {item.Trim()}";
@@ -682,7 +708,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(text) || ReaderMessage is null || SelectedFolder is null) return;
         var body = await _store.GetBodyAsync(ReaderMessage.Id);
-        var seed = Core.Text.ComposeBuilder.Reply(ReaderMessage, body, SelectedFolder.Account.Email, replyAll: false);
+        var seed = Core.Text.ComposeBuilder.Reply(ReaderMessage, body, AccountOf(ReaderMessage).Email, replyAll: false);
         seed.TextBody = text.Trim() + seed.TextBody;
         await OpenComposeAsync(seed);
     }
@@ -906,10 +932,11 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
         var account = CurrentAccount;
+        var allAccounts = SelectedFolder is { IsUnified: true }; // searching from All inboxes covers every account
         if (SearchAllFolders && account is not null && !IsBusy)
         {
             // Folders that were never opened have nothing cached, so a whole-account search would silently skip them.
-            var unsynced = Folders.Where(f => f.Account.Id == account.Id && f.Folder.HighestUid == 0 && f.Kind != FolderKind.Trash && f.Kind != FolderKind.Junk).ToList();
+            var unsynced = Folders.Where(f => (allAccounts || f.Account.Id == account.Id) && f.Folder.HighestUid == 0 && f.Kind != FolderKind.Trash && f.Kind != FolderKind.Junk).ToList();
             if (unsynced.Count > 0)
             {
                 await RunBusyAsync("Syncing folders for search...", async () =>
@@ -928,9 +955,12 @@ public sealed partial class MainViewModel : ObservableObject
         SelectedMessage = null;
         ListTitle = $"Search: {SearchText}";
         long? folderId = SearchAllFolders || SelectedFolder is null or { IsView: true } ? null : SelectedFolder.Folder.Id;
-        foreach (var m in await _store.SearchAsync(SearchText, account?.Id, folderId))
+        foreach (var m in await _store.SearchAsync(SearchText, allAccounts ? null : account?.Id, folderId))
+        {
+            if (allAccounts && Accounts.Count > 1) m.AccountName = AccountOf(m).Name;
             Messages.Add(m);
-        var scope = SearchAllFolders ? "all folders" : (SelectedFolder?.DisplayName ?? "this folder");
+        }
+        var scope = SearchAllFolders ? (allAccounts && Accounts.Count > 1 ? "all accounts" : "all folders") : (SelectedFolder?.DisplayName ?? "this folder");
         ListSubtitle = $"{Messages.Count} result{(Messages.Count == 1 ? "" : "s")} in {scope}";
         StatusText = ListSubtitle;
     }
@@ -942,7 +972,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (message is null || SelectedFolder is null) return;
         message.IsFlagged = !message.IsFlagged;
-        await _sync.SetFlagsAsync(SelectedFolder.Account, message, isFlagged: message.IsFlagged);
+        await _sync.SetFlagsAsync(AccountOf(message), message, isFlagged: message.IsFlagged);
         var idx = Messages.IndexOf(message);
         if (idx >= 0) { Messages[idx] = message; }
     }
@@ -957,35 +987,52 @@ public sealed partial class MainViewModel : ObservableObject
     public async Task TrashMessagesAsync(IReadOnlyList<MessageSummary> messages)
     {
         if (messages.Count == 0 || SelectedFolder is null) return;
-        var trash = Folders.FirstOrDefault(f => f.Account.Id == SelectedFolder.Account.Id && f.Kind == FolderKind.Trash);
-        if (trash is null) { StatusText = "No Trash folder found for this account."; return; }
 
-        var toMove = messages.Where(m => m.FolderId != trash.Folder.Id).ToList();
-        if (toMove.Count == 0)
+        // Rows in All inboxes belong to different accounts: each goes to its own account's Trash.
+        var byTrash = new List<(FolderItem trash, List<MessageSummary> messages)>();
+        foreach (var group in messages.GroupBy(m => AccountOf(m).Id))
+        {
+            var trash = Folders.FirstOrDefault(f => f.Account.Id == group.Key && f.Kind == FolderKind.Trash);
+            if (trash is null) { StatusText = "No Trash folder found for this account."; return; }
+            var toMove = group.Where(m => m.FolderId != trash.Folder.Id).ToList();
+            if (toMove.Count > 0) byTrash.Add((trash, toMove));
+        }
+        if (byTrash.Count == 0)
         {
             StatusText = messages.Count == 1 ? "That message is already in Trash." : "Those messages are already in Trash.";
             return;
         }
 
-        var positions = toMove.Select(Messages.IndexOf).Where(i => i >= 0).ToList();
+        var positions = messages.Select(Messages.IndexOf).Where(i => i >= 0).ToList();
         var nextIndex = positions.Count == 0 ? -1 : positions.Min();
 
-        await MoveMessagesAsync(toMove, trash);
+        foreach (var (trash, toMove) in byTrash) await MoveMessagesAsync(toMove, trash);
 
         if (nextIndex >= 0 && Messages.Count > 0 && (SelectedMessage is null || !Messages.Contains(SelectedMessage)))
             SelectedMessage = Messages[Math.Min(nextIndex, Messages.Count - 1)];
     }
 
-    /// <summary>Whether a drag of messages may land on this folder: same account, and a folder that can hold moved mail.</summary>
+    /// <summary>
+    /// Whether a drag of messages may land on this folder: a real folder that can hold moved mail, in the same account as the
+    /// list (or any account while All inboxes is showing; the drop then keeps only the messages of that account).
+    /// </summary>
     public bool CanDropOn(FolderItem target) =>
-        SelectedFolder is not null && !target.IsView && target.Account.Id == SelectedFolder.Account.Id && target.Kind != FolderKind.Drafts;
+        SelectedFolder is not null && !target.IsView && target.Kind != FolderKind.Drafts
+        && (SelectedFolder.IsUnified || target.Account.Id == SelectedFolder.Account.Id);
 
-    /// <summary>Drag-and-drop move. Messages already in the target are skipped; counts update without a full reload so search results stay put.</summary>
+    /// <summary>Drag-and-drop move. Messages already in the target, or from another account, are skipped; counts update without a full reload so search results stay put.</summary>
     public async Task MoveMessagesAsync(IReadOnlyList<MessageSummary> messages, FolderItem target)
     {
-        var toMove = messages.Where(m => m.FolderId != target.Folder.Id).ToList();
-        if (toMove.Count == 0 || !CanDropOn(target)) return;
+        if (!CanDropOn(target)) return;
+        var toMove = messages.Where(m => m.FolderId != target.Folder.Id && AccountOf(m).Id == target.Account.Id).ToList();
+        var skipped = messages.Count(m => AccountOf(m).Id != target.Account.Id);
+        if (toMove.Count == 0)
+        {
+            if (skipped > 0) StatusText = $"{target.DisplayName} belongs to {target.Account.Name}; those messages are in another account.";
+            return;
+        }
         var label = toMove.Count == 1 ? $"\"{toMove[0].Subject}\"" : $"{toMove.Count} messages";
+        if (skipped > 0) label += $" ({skipped} from another account left alone)";
         await RunBusyAsync($"Moving {label} to {target.DisplayName}...", async () =>
         {
             await _sync.MoveAsync(target.Account, toMove, target.Folder);
@@ -1100,7 +1147,11 @@ public sealed partial class MainViewModel : ObservableObject
         await RunBusyAsync($"{_agent.Name}: reviewing {SelectedFolder.DisplayName}...", async () =>
         {
             Proposals.Clear();
-            var proposals = await _agent.ProposeTriageAsync(SelectedFolder.Account.Id, SelectedFolder.Folder.Id);
+            // A view is not a server folder: the agent tidies the account's Inbox instead.
+            var target = SelectedFolder.IsView
+                ? Folders.FirstOrDefault(f => f.Account.Id == SelectedFolder.Account.Id && f.Kind == FolderKind.Inbox) ?? SelectedFolder
+                : SelectedFolder;
+            var proposals = await _agent.ProposeTriageAsync(target.Account.Id, target.Folder.Id);
             foreach (var p in proposals) Proposals.Add(p);
             AgentSummary = _agent.LastRunNote ?? "";
             StatusText = proposals.Count == 0 ? $"{_agent.Name}: nothing to tidy." : $"{_agent.Name}: {proposals.Count} proposals ready for review.";
