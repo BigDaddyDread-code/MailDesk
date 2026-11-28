@@ -66,6 +66,13 @@ public partial class MainWindow : FluentWindow
             var dialog = new NameDialog(title, prompt, initial) { Owner = this };
             return Task.FromResult(dialog.ShowDialog() == true ? dialog.Result : null);
         };
+        vm.RequestPalette = (commands, fallback) =>
+        {
+            var palette = new PaletteWindow(new PaletteViewModel(commands, fallback)) { Owner = this };
+            palette.ShowDialog();
+            return Task.FromResult(palette.Chosen);
+        };
+        vm.RequestFocusSearch = () => { SearchBox.Focus(); SearchBox.SelectAll(); };
         vm.RequestRuleEditor = ShowRuleEditorAsync;
         vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;
@@ -120,6 +127,43 @@ public partial class MainWindow : FluentWindow
         if (view is null) return;
         view.GroupDescriptions.Clear();
         if (_vm.GroupFoldersByAccount) view.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription("Account.Name"));
+    }
+
+    // ---------------- Keyboard shortcuts ----------------
+
+    /// <summary>
+    /// Window-wide shortcuts. All need Ctrl or a function key so typing in the search or question box is never hijacked.
+    /// The reader (WebView2) forwards accelerator keys, so these work while it has focus too. The palette lists them.
+    /// </summary>
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+        var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var handled = (ctrl, shift, key) switch
+        {
+            (true, false, Key.K) => Run(_vm.OpenPaletteCommand),
+            (true, false, Key.N) => Run(_vm.ComposeNewCommand),
+            (true, false, Key.R) => Run(_vm.ReplyCommand),
+            (true, true, Key.R) => Run(_vm.ReplyAllCommand),
+            (true, true, Key.F) => Run(_vm.ForwardCommand),
+            (true, false, Key.F) => Run(_vm.FocusSearchCommand),
+            (true, true, Key.L) => Run(_vm.ToggleReaderFlagCommand),
+            (true, true, Key.V) => Run(_vm.ToggleConversationsCommand),
+            (true, false, Key.T) => Run(_vm.OpenTasksCommand),
+            (true, true, Key.C) => Run(_vm.OpenCalendarCommand),
+            (true, true, Key.A) => Run(_vm.ToggleAgentPaneCommand),
+            (false, false, Key.F5) => Run(_vm.SyncCommand),
+            _ => false,
+        };
+        if (handled) e.Handled = true;
+
+        static bool Run(ICommand command)
+        {
+            if (!command.CanExecute(null)) return false;
+            command.Execute(null);
+            return true;
+        }
     }
 
     private void QuestionBox_KeyDown(object sender, KeyEventArgs e)

@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MailDesk.Agent;
 using MailDesk.App.Services;
+using MailDesk.Core.Commands;
 using MailDesk.Core.Models;
 using MailDesk.Core.Rules;
 using MailDesk.Core.Security;
@@ -1296,6 +1297,80 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleAgentPane() => IsAgentPaneOpen = !IsAgentPaneOpen;
+
+    // ---------------- Command palette and shortcuts ----------------
+
+    /// <summary>Raised by the view to show the palette. Returns the chosen command, or null when dismissed.</summary>
+    public Func<IReadOnlyList<PaletteCommand>, Func<string, PaletteCommand?>, Task<PaletteCommand?>>? RequestPalette { get; set; }
+
+    /// <summary>Raised by the view to put the caret in the search box.</summary>
+    public Action? RequestFocusSearch { get; set; }
+
+    [RelayCommand]
+    private void FocusSearch() => RequestFocusSearch?.Invoke();
+
+    [RelayCommand]
+    private void ToggleConversations() => ShowConversations = !ShowConversations;
+
+    [RelayCommand]
+    private Task ToggleReaderFlagAsync() => ToggleFlagAsync(ReaderMessage);
+
+    [RelayCommand]
+    private Task TrashReaderMessageAsync() => TrashMessagesAsync(ReaderMessage is null ? [] : [ReaderMessage]);
+
+    [RelayCommand]
+    private async Task OpenPaletteAsync()
+    {
+        if (RequestPalette is null) return;
+        var chosen = await RequestPalette(BuildPaletteCommands(), query => new PaletteCommand(
+            $"Search mail for \"{query}\"", "Search", async () => { SearchText = query; await SearchAsync(); }, Shortcut: "Enter"));
+        if (chosen is null) return;
+        try { await chosen.Run(); }
+        catch (Exception ex) { StatusText = $"{chosen.Title}: {ex.Message}"; }
+    }
+
+    /// <summary>Everything the palette offers right now: actions that apply to the open message, places to open, and every sidebar entry.</summary>
+    public IReadOnlyList<PaletteCommand> BuildPaletteCommands()
+    {
+        var list = new List<PaletteCommand>();
+        void Add(string title, string group, Func<Task> run, string detail = "", string shortcut = "") => list.Add(new PaletteCommand(title, group, run, detail, shortcut));
+        void AddSync(string title, string group, Action run, string detail = "", string shortcut = "") => Add(title, group, () => { run(); return Task.CompletedTask; }, detail, shortcut);
+
+        Add("New message", "Actions", ComposeNewAsync, shortcut: "Ctrl+N");
+        if (ReaderMessage is { } open)
+        {
+            var about = open.Subject.Length > 40 ? open.Subject[..40] + "..." : open.Subject;
+            Add("Reply", "Actions", ReplyAsync, about, "Ctrl+R");
+            Add("Reply all", "Actions", ReplyAllAsync, about, "Ctrl+Shift+R");
+            Add("Forward", "Actions", ForwardAsync, about, "Ctrl+Shift+F");
+            Add(open.IsFlagged ? "Remove flag" : "Flag message", "Actions", ToggleReaderFlagAsync, about, "Ctrl+Shift+L");
+            Add("Move to Trash", "Actions", TrashReaderMessageAsync, about, "Del");
+            Add("Summarise with AI", "Actions", SummariseAsync, about);
+            if (HasThread) Add("Analyse conversation", "Actions", AnalyseThreadAsync, "Decisions, commitments and open questions");
+            Add("Create task from message", "Actions", () => CreateTaskFromMessageAsync(open), about);
+            Add("Create rule from sender", "Actions", () => CreateRuleFromSenderAsync(open), open.FromDisplay);
+        }
+        AddSync("Search mail", "Actions", () => RequestFocusSearch?.Invoke(), "Jump to the search box", "Ctrl+F");
+        if (!string.IsNullOrWhiteSpace(SearchText)) Add("Save this search", "Actions", SaveSearchAsync, SearchText);
+        Add("Sync", "Actions", SyncAsync, SelectedFolder?.DisplayName ?? "", "F5");
+        Add("Tidy with agent", "Actions", RunTriageAsync, "Proposals only; nothing moves until you approve");
+        AddSync(ShowConversations ? "Show single messages" : "Show conversations", "Actions", ToggleConversations, "List one row per thread or per message", "Ctrl+Shift+V");
+
+        Add("Tasks", "Open", OpenTasksAsync, shortcut: "Ctrl+T");
+        Add("Calendar", "Open", OpenCalendarAsync, shortcut: "Ctrl+Shift+C");
+        Add("Commitments", "Open", OpenCommitmentsAsync, "What you owe and what others owe you");
+        Add("Reminders", "Open", OpenRemindersAsync, ReminderCount > 0 ? $"{ReminderCount} waiting" : "");
+        Add("Rules", "Open", OpenRulesAsync);
+        AddSync(IsAgentPaneOpen ? "Hide agent pane" : "Show agent pane", "Open", ToggleAgentPane, shortcut: "Ctrl+Shift+A");
+        Add("AI settings", "Open", OpenAiSettingsAsync);
+        Add("Add account", "Open", AddAccountAsync);
+
+        var manyAccounts = Accounts.Count > 1;
+        foreach (var v in Views) AddSync(v.DisplayName, "Go to", () => SelectedFolder = v, manyAccounts && !v.IsUnified ? v.Account.Name : v.Description);
+        foreach (var s in SavedSearches) AddSync(s.DisplayName, "Saved search", () => SelectedFolder = s, s.Description);
+        foreach (var f in Folders) AddSync(f.DisplayName, "Go to", () => SelectedFolder = f, manyAccounts ? f.Account.Name : (f.Folder.FullName == f.DisplayName ? "" : f.Folder.FullName));
+        return list;
+    }
 
     private async Task RunBusyAsync(string status, Func<Task> work)
     {

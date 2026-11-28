@@ -13,7 +13,7 @@
         Title="MailDesk" Height="820" Width="1320" MinWidth="960" MinHeight="540"
         ExtendsContentIntoTitleBar="True" WindowBackdropType="None" WindowCornerPreference="Round"
         Background="{StaticResource SurfaceBrush}"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen" PreviewKeyDown="Window_PreviewKeyDown">
 
     <Grid>
         <Grid.RowDefinitions>
@@ -141,6 +141,10 @@
                     </Border>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <!-- Command palette: every action, folder and view, type to filter -->
+                        <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenPaletteCommand}" ToolTip="Command palette (Ctrl+K): actions, folders, views and shortcuts" Margin="0,0,6,0">
+                            <TextBlock Text="&#xE756;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center" />
+                        </Button>
                         <!-- Reminders bell: unanswered sent mail, overdue commitments and tasks -->
                         <Button Style="{StaticResource TopBarButtonStyle}" Command="{Binding OpenRemindersCommand}" ToolTip="Reminders: sent mail without a reply, overdue commitments and tasks" Margin="0,0,6,0">
                             <Grid>

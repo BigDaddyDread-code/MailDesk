@@ -269,6 +269,33 @@ scoped to, else Inbox and Sent of the accounts it spans. Rename and remove are o
 touches mail. The assistant can see them through `list_saved_searches` and runs one by handing its query to
 `search_messages`.
 
+## Keyboard shortcuts and the command palette
+
+**Ctrl+K** (or the prompt icon in the top bar) opens the command palette: one list of everything you can do and everywhere
+you can go. Type to filter; words match as runs or as initials, so `ra` finds Reply all and `inb` finds every Inbox. The
+list holds actions for the open message (reply, forward, flag, trash, summarise, analyse, task, rule), the windows (tasks,
+calendar, commitments, reminders, rules, AI settings), every view, saved search and folder with its account, and, when
+nothing else matches, **Search mail for "..."** so typing a few words is also the fastest way to search. Up/Down move,
+Enter runs after the palette closes, Escape dismisses. The palette never runs anything on its own, and sending still ends
+in the compose window's Send button.
+
+| Shortcut | Does |
+|---|---|
+| `Ctrl+K` | Command palette |
+| `Ctrl+N` | New message |
+| `Ctrl+R`, `Ctrl+Shift+R` | Reply, Reply all |
+| `Ctrl+Shift+F` | Forward |
+| `Ctrl+F` | Jump to the search box |
+| `Ctrl+Shift+L` | Flag or unflag the open message |
+| `Del` | Move the selected messages to Trash |
+| `F5` | Sync the selected folder or view |
+| `Ctrl+Shift+V` | Conversations or single messages |
+| `Ctrl+T`, `Ctrl+Shift+C` | Tasks, Calendar |
+| `Ctrl+Shift+A` | Agent pane |
+
+Every shortcut needs Ctrl or a function key, so typing in the search or question box is never hijacked. The palette shows
+each command's shortcut beside it.
+
 ## Compose, reply, forward
 
 **New message** in the top bar opens the compose window: To, Cc/Bcc, subject, plain-text body, file attachments.
@@ -303,7 +330,7 @@ act on while staying in control. Measured against five workspaces, this is the s
 
 | Workspace | Question | Have | Missing |
 |---|---|---|---|
-| Inbox | What arrived and needs attention? | All inboxes across accounts, Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Snooze, keyboard command palette, thread-wide move and delete |
+| Inbox | What arrived and needs attention? | All inboxes across accounts, Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control, command palette and keyboard shortcuts | Snooze, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
 | Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant, reminders after a threshold with one-click nudge drafts, snooze and dismiss | Reminders as Windows notifications when the app is in the background |
 | Knowledge | What was discussed, agreed or promised? | Search operators, folder search, saved searches as live sidebar views, conversation timeline, decisions / commitments / open questions per thread linked to their source message, Commitments ledger across conversations, `get_conversation`, `list_commitments` and `list_saved_searches` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, automatic analysis of new replies in already-analysed threads |
@@ -316,8 +343,8 @@ Engineering next steps, in order:
 
 1. Per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
 2. Windows notifications for new priority mail and reminders while the app is in the background.
-3. Keyboard shortcuts and a command palette.
-4. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.
+3. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.
+4. Snooze; thread-wide move and delete.
 
 ## License
 
