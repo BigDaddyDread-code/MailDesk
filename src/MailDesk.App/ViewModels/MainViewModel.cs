@@ -384,19 +384,98 @@ public sealed partial class MainViewModel : ObservableObject
     private void OpenThreadEntry(ThreadEntry? entry)
     {
         if (entry is null || entry.IsCurrent) return;
-        var inList = Messages.FirstOrDefault(m => m.Id == entry.Message.Id);
+        ShowInPlace(entry.Message);
+    }
+
+    /// <summary>Selects the message when the list holds it, otherwise shows it in the reader without touching the list.</summary>
+    private void ShowInPlace(MessageSummary message)
+    {
+        var inList = Messages.FirstOrDefault(m => m.Id == message.Id);
         if (inList is not null) SelectedMessage = inList;
-        else ReaderMessage = entry.Message;
+        else ReaderMessage = message;
+    }
+
+    // ---- Decisions, commitments and open questions per conversation ----
+
+    [ObservableProperty] private ConversationInsight? _threadInsight;
+    [ObservableProperty] private bool _isAnalysingThread;
+    private const string ThreadInsightKeyPrefix = "thread.insight:";
+    private IReadOnlyList<MessageSummary> _threadRows = [];
+
+    /// <summary>Sends the whole conversation to the model and shows what was decided, promised and asked, linked to the source messages.</summary>
+    [RelayCommand]
+    private async Task AnalyseThreadAsync()
+    {
+        if (ReaderMessage is null || SelectedFolder is null || RequestProtector is null || _threadRows.Count == 0) return;
+        var message = ReaderMessage;
+        var account = SelectedFolder.Account;
+        var rows = _threadRows;
+        IsAnalysingThread = true;
+        try
+        {
+            var client = await ModelClients.CreateAsync(_store, RequestProtector());
+            var bodies = new Dictionary<long, string>();
+            foreach (var m in rows)
+            {
+                StatusText = $"Reading {bodies.Count + 1} of {rows.Count} messages...";
+                try { bodies[m.Id] = Core.Text.ComposeBuilder.BodyText(await _sync.FetchBodyAsync(account, m)); }
+                catch { bodies[m.Id] = m.Snippet; }
+            }
+            StatusText = "Analysing the conversation...";
+            var insight = await ConversationAnalyst.AnalyzeAsync(client, account.Name, account.Email, rows, bodies);
+            await _store.SetSettingAsync(ThreadInsightKeyPrefix + insight.ThreadKey, ConversationAnalyst.Serialize(insight));
+            if (ReferenceEquals(message, ReaderMessage) || ReaderMessage?.ThreadKey == insight.ThreadKey) ThreadInsight = insight;
+            StatusText = $"Conversation analysed with {insight.ModelNote}: {insight.Counts}.";
+        }
+        catch (Exception ex) { StatusText = $"Analyse failed: {ex.Message}"; }
+        finally { IsAnalysingThread = false; }
+    }
+
+    [RelayCommand]
+    private void CloseThreadInsight() => ThreadInsight = null;
+
+    /// <summary>Opens the message a decision, commitment or question came from.</summary>
+    [RelayCommand]
+    private async Task OpenInsightSourceAsync(ThreadItem? item)
+    {
+        if (item?.MessageId is not { } id) return;
+        var inThread = _threadRows.FirstOrDefault(m => m.Id == id) ?? await _store.GetMessageAsync(id);
+        if (inThread is null) { StatusText = "That message is no longer in the local cache."; return; }
+        ShowInPlace(inThread);
+    }
+
+    /// <summary>A commitment of yours becomes a task with its due date and a link to the message it was made in.</summary>
+    [RelayCommand]
+    private async Task AddCommitmentTaskAsync(ThreadItem? item)
+    {
+        if (item is null || SelectedFolder is null) return;
+        var source = item.MessageId is { } id ? _threadRows.FirstOrDefault(m => m.Id == id) : null;
+        var task = new TaskItem
+        {
+            AccountId = SelectedFolder.Account.Id, Title = item.Text, DueUtcMs = item.DueDate?.ToUnixTimeMilliseconds(),
+            Notes = source is null ? "Promised in a conversation" : $"Promised to {source.ToAddresses}",
+            SourceMessageId = source?.Id, SourceSubject = source?.Subject ?? ReaderMessage?.Subject ?? "",
+            CreatedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
+        await _store.UpsertTaskAsync(task);
+        StatusText = $"Task added: {task.Title}";
     }
 
     private async Task LoadThreadAsync(MessageSummary message)
     {
         Thread.Clear();
         HasThread = false;
+        ThreadInsight = null;
+        _threadRows = [];
         if (SelectedFolder is null || string.IsNullOrEmpty(message.ThreadKey)) return;
         var account = SelectedFolder.Account;
         var rows = await _store.GetThreadAsync(account.Id, message.ThreadKey);
         if (!ReferenceEquals(message, ReaderMessage) || rows.Count < 2) return;
+        _threadRows = rows;
+
+        // A cached analysis is shown again until the thread grows.
+        var cached = ConversationAnalyst.Deserialize(await _store.GetSettingAsync(ThreadInsightKeyPrefix + message.ThreadKey));
+        if (cached is not null && cached.MessageCount == rows.Count && ReferenceEquals(message, ReaderMessage)) ThreadInsight = cached;
         foreach (var r in rows)
             Thread.Add(new ThreadEntry(r, r.Id == message.Id, r.FromAddress.Equals(account.Email, StringComparison.OrdinalIgnoreCase)));
         var mine = rows.Count(r => r.FromAddress.Equals(account.Email, StringComparison.OrdinalIgnoreCase));

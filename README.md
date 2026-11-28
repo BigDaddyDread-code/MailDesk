@@ -118,6 +118,24 @@ nothing at read time.
 Operations on a conversation row act on that one message, not the whole thread. Deleting or moving a thread at once is
 not built yet.
 
+### Decisions, commitments and open questions
+
+**Decisions** on the timeline header sends the conversation (each message's own words, quoted replies stripped, labelled
+with its local id) to the model named in AI settings and shows a card with four lists:
+
+- **Decided**: what was agreed, and by whom.
+- **Promised**: who owes what, with a due date when one was given and a *done* mark when a later message shows it was carried
+  out. A promise of yours has **Add task**, which creates a task with the due date and a link to the message it was made in.
+- **Still open**: questions nobody has answered.
+- **Unclear**: what the thread leaves ambiguous, or what the model could not tell.
+
+Every item carries the message it came from (**Open** shows it in the reader without changing the list) and a basis: items
+said in so many words are plain, items the model read from context are tagged *inferred*, and the model is told to return
+only message ids it was given, so a link can never point outside the conversation. The result is kept in the local settings
+table under the thread key and shown again next time until the conversation grows; **Hide** only hides it.
+
+Like Summarise and Ask, this runs only on your click and sends message text to the provider you chose.
+
 ## Views: Priority, Waiting, Newsletters, Notifications
 
 The sidebar starts with four **Views** built from the local cache, one set per account, above the server folders:
@@ -242,7 +260,7 @@ act on while staying in control. Measured against five workspaces, this is the s
 | Inbox | What arrived and needs attention? | Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Unified inbox across accounts, snooze, keyboard command palette, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
 | Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant | Reminders when a wait passes a threshold, "nudge" drafts |
-| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, `get_conversation` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, decisions and commitments extracted per thread with links to the source message, saved searches |
+| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, decisions / commitments / open questions per thread linked to their source message, `get_conversation` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, saved searches, a cross-thread view of every open commitment |
 | Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
 
 Everything the AI does is proposal-only: it never sends, deletes or changes a record on its own, and the review pane shows
@@ -251,7 +269,7 @@ what it wants to do before anything happens. That rule holds for every item in t
 Engineering next steps, in order:
 
 1. Unified inbox and per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
-2. Decisions, commitments and open questions extracted per conversation, each linked to its source message.
+2. A Commitments view across all analysed conversations: everything you owe and everything owed to you, with due dates.
 3. Saved searches as sidebar views, built on the search operators above.
 4. Keyboard shortcuts and a command palette.
 5. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.
