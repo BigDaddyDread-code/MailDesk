@@ -203,6 +203,15 @@ public sealed class SqliteMailStore : IMailStore
         );
         CREATE INDEX IF NOT EXISTS ix_thread_facts_account ON thread_facts(AccountId, IsDone, DueUtcMs);
         CREATE INDEX IF NOT EXISTS ix_thread_facts_thread ON thread_facts(ThreadKey);
+        CREATE TABLE IF NOT EXISTS saved_searches (
+            Id INTEGER PRIMARY KEY AUTOINCREMENT,
+            AccountId INTEGER REFERENCES accounts(Id) ON DELETE CASCADE,
+            FolderId INTEGER REFERENCES folders(Id) ON DELETE SET NULL,
+            Name TEXT NOT NULL,
+            Query TEXT NOT NULL,
+            SortOrder INTEGER NOT NULL DEFAULT 0,
+            CreatedUtcMs INTEGER NOT NULL DEFAULT 0
+        );
         """;
 
     // ---------------- Tasks ----------------
@@ -395,6 +404,44 @@ public sealed class SqliteMailStore : IMailStore
             "SELECT Key, Value FROM settings WHERE Value IS NOT NULL AND Key LIKE @like ESCAPE '\\' ORDER BY Key",
             new { like = EscapeLike(prefix) + "%" });
         return rows.ToList();
+    }
+
+    // ---------------- Saved searches ----------------
+
+    public async Task<IReadOnlyList<SavedSearch>> GetSavedSearchesAsync(CancellationToken ct = default)
+    {
+        using var conn = Open();
+        var rows = await conn.QueryAsync<SavedSearch>("SELECT * FROM saved_searches ORDER BY SortOrder, Id");
+        return rows.ToList();
+    }
+
+    public async Task<long> UpsertSavedSearchAsync(SavedSearch search, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        search.Name = search.Name.Trim();
+        search.Query = search.Query.Trim();
+        if (search.Id == 0)
+        {
+            if (search.CreatedUtcMs == 0) search.CreatedUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            search.SortOrder = await conn.ExecuteScalarAsync<int>("SELECT COALESCE(MAX(SortOrder), 0) + 1 FROM saved_searches");
+            search.Id = await conn.ExecuteScalarAsync<long>("""
+                INSERT INTO saved_searches (AccountId, FolderId, Name, Query, SortOrder, CreatedUtcMs)
+                VALUES (@AccountId, @FolderId, @Name, @Query, @SortOrder, @CreatedUtcMs);
+                SELECT last_insert_rowid();
+                """, search);
+        }
+        else
+        {
+            await conn.ExecuteAsync(
+                "UPDATE saved_searches SET AccountId=@AccountId, FolderId=@FolderId, Name=@Name, Query=@Query, SortOrder=@SortOrder WHERE Id=@Id", search);
+        }
+        return search.Id;
+    }
+
+    public async Task DeleteSavedSearchAsync(long id, CancellationToken ct = default)
+    {
+        using var conn = Open();
+        await conn.ExecuteAsync("DELETE FROM saved_searches WHERE Id=@id", new { id });
     }
 
     // ---------------- Facts from conversations ----------------

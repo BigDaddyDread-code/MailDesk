@@ -27,16 +27,39 @@ public sealed partial class FolderItem : ObservableObject
         };
     }
 
+    /// <summary>A saved search. Its Account is only an anchor when the search spans every account.</summary>
+    public FolderItem(Account account, SavedSearch search)
+    {
+        Account = account;
+        Search = search;
+        Folder = new MailFolder
+        {
+            Id = -(100 + search.Id), AccountId = account.Id, FullName = $"search:{search.Id}", DisplayName = search.Name, Kind = FolderKind.Other,
+        };
+    }
+
     public Account Account { get; }
     public MailFolder Folder { get; }
     public SmartView? View { get; }
-    public bool IsView => View is not null;
+    public SavedSearch? Search { get; }
+    /// <summary>Anything that is not a server folder: a smart view or a saved search.</summary>
+    public bool IsView => View is not null || Search is not null;
+    public bool IsSearch => Search is not null;
+
+    /// <summary>After a rename or a query change on a saved search.</summary>
+    public void Refresh()
+    {
+        if (Search is null) return;
+        Folder.DisplayName = Search.Name;
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(Description));
+    }
     /// <summary>The cross-account inbox. Its Account is only an anchor; rows resolve their own account by folder.</summary>
     public bool IsUnified => View == SmartView.AllInboxes;
 
     public string DisplayName => Folder.DisplayName;
     public FolderKind Kind => Folder.Kind;
-    public string Icon => View switch
+    public string Icon => Search is not null ? "" : View switch
     {
         SmartView.AllInboxes => "",
         SmartView.Priority => "",
@@ -55,7 +78,7 @@ public sealed partial class FolderItem : ObservableObject
         },
     };
 
-    public string Description => View switch
+    public string Description => Search is not null ? Search.Query : View switch
     {
         SmartView.AllInboxes => "Every account's Inbox in one list",
         SmartView.Priority => "Inbox mail from people: newsletters and notifications filtered out",

@@ -189,6 +189,26 @@ public sealed class TriageToolboxTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Mailbox_toolbox_lists_saved_searches_for_this_account_and_shared_ones()
+    {
+        var box = new MailboxToolbox(_store, null, _account);
+        var stranger = new Account { Name = "Other", Email = "o@x", ImapHost = "h", Username = "o", ProtectedPassword = "p" };
+        await _store.UpsertAccountAsync(stranger);
+        await _store.UpsertSavedSearchAsync(new SavedSearch { AccountId = _account.Id, Name = "Job alerts", Query = "from:alerts@jobs.test" });
+        await _store.UpsertSavedSearchAsync(new SavedSearch { AccountId = null, Name = "Everything from Pat", Query = "from:pat" });
+        await _store.UpsertSavedSearchAsync(new SavedSearch { AccountId = stranger.Id, Name = "Not mine", Query = "x" });
+
+        var list = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("list_saved_searches", J(new { })));
+        var names = list.EnumerateArray().Select(e => e.GetProperty("name").GetString() ?? "").ToArray();
+        Assert.Equal(["Job alerts", "Everything from Pat"], names);
+        Assert.Equal("all accounts", list[1].GetProperty("scope").GetString());
+
+        // The agent runs one by handing its query to search_messages.
+        var hits = JsonSerializer.Deserialize<JsonElement>(await box.ExecuteAsync("search_messages", J(new { query = list[0].GetProperty("query").GetString() })));
+        Assert.Equal(2, hits.GetProperty("total").GetInt32());
+    }
+
+    [Fact]
     public async Task Mailbox_toolbox_sees_calendar_and_tasks_and_records_offers()
     {
         var box = new MailboxToolbox(_store, null, _account);

@@ -94,6 +94,7 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="White" Opacity="0.8" VerticalAlignment="Center" Margin="10,0,6,0" />
                             <TextBox x:Name="SearchBox" Grid.Column="1" Background="Transparent" BorderThickness="0" Foreground="White" CaretBrush="White"
@@ -130,6 +131,12 @@
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
+                            <!-- Save the current query as a sidebar entry; appears once there is something to save -->
+                            <Button Grid.Column="3" Command="{Binding SaveSearchCommand}" Background="Transparent" BorderThickness="0" Padding="6,0" Margin="0,0,4,0" Cursor="Hand"
+                                    Foreground="White" ToolTip="Save this search to the sidebar"
+                                    Visibility="{Binding SearchText, Converter={StaticResource NonEmptyToVisibility}}">
+                                <TextBlock Text="&#xE74E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" />
+                            </Button>
                         </Grid>
                     </Border>
 
@@ -172,6 +179,8 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <StackPanel Margin="20,16,20,8">
@@ -201,8 +210,37 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <TextBlock Grid.Row="2" Text="Folders" Foreground="{StaticResource SidebarTextBrush}" FontSize="13" FontWeight="SemiBold" Margin="20,14,20,8" />
-                    <ListBox Grid.Row="3" x:Name="FolderList" ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder}"
+                    <!-- Saved searches: each re-runs its query when selected. Hidden until the first one is saved. -->
+                    <TextBlock Grid.Row="2" Text="Saved searches" Foreground="{StaticResource SidebarTextBrush}" FontSize="13" FontWeight="SemiBold" Margin="20,14,20,0"
+                               Visibility="{Binding HasSavedSearches, Converter={StaticResource BoolToVisibility}}" />
+                    <ListBox Grid.Row="3" x:Name="SavedSearchList" ItemsSource="{Binding SavedSearches}" SelectedItem="{Binding SelectedFolder}"
+                             Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarItemStyle}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" MaxHeight="180"
+                             Visibility="{Binding HasSavedSearches, Converter={StaticResource BoolToVisibility}}">
+                        <ListBox.Resources>
+                            <ContextMenu x:Key="SavedSearchMenu">
+                                <MenuItem Header="Rename..." Command="{Binding PlacementTarget.Tag.RenameSavedSearchCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <MenuItem Header="Replace with current search" Command="{Binding PlacementTarget.Tag.UpdateSavedSearchCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                                          ToolTip="Points this entry at whatever is in the search box now" />
+                                <Separator />
+                                <MenuItem Header="Remove from sidebar" Command="{Binding PlacementTarget.Tag.DeleteSavedSearchCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                            </ContextMenu>
+                        </ListBox.Resources>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:FolderItem}">
+                                <Grid ToolTip="{Binding Description}" ContextMenu="{StaticResource SavedSearchMenu}" Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}" Background="Transparent">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Icon}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Grid.Row="4" Text="Folders" Foreground="{StaticResource SidebarTextBrush}" FontSize="13" FontWeight="SemiBold" Margin="20,14,20,8" />
+                    <ListBox Grid.Row="5" x:Name="FolderList" ItemsSource="{Binding Folders}" SelectedItem="{Binding SelectedFolder}"
                              Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarItemStyle}"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              AllowDrop="True" DragOver="FolderList_DragOver" DragLeave="FolderList_DragLeave" Drop="FolderList_Drop">

@@ -61,6 +61,11 @@ public partial class MainWindow : FluentWindow
             new CommitmentsWindow(commitmentsVm) { Owner = this }.Show();
             return Task.CompletedTask;
         };
+        vm.RequestName = (title, prompt, initial) =>
+        {
+            var dialog = new NameDialog(title, prompt, initial) { Owner = this };
+            return Task.FromResult(dialog.ShowDialog() == true ? dialog.Result : null);
+        };
         vm.RequestRuleEditor = ShowRuleEditorAsync;
         vm.RequestRulesWindow = ShowRulesWindowAsync;
         vm.PropertyChanged += OnViewModelPropertyChanged;

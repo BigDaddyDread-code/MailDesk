@@ -32,6 +32,9 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<FolderItem> Folders { get; } = [];
     /// <summary>Smart views (Priority, Waiting, Newsletters, Notifications), one set per account, shown above the folders.</summary>
     public ObservableCollection<FolderItem> Views { get; } = [];
+    /// <summary>Saved searches, shown between the views and the folders. Each re-runs its query when opened.</summary>
+    public ObservableCollection<FolderItem> SavedSearches { get; } = [];
+    public bool HasSavedSearches => SavedSearches.Count > 0;
     public ObservableCollection<MessageSummary> Messages { get; } = [];
     public ObservableCollection<AgentProposal> Proposals { get; } = [];
     public ObservableCollection<MailRule> Rules { get; } = [];
@@ -84,6 +87,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Raised by the view to show the commitments window.</summary>
     public Func<Account, Task>? RequestCommitments { get; set; }
+
+    /// <summary>Raised by the view to ask for a short name (title, prompt, initial value). Returns null when cancelled.</summary>
+    public Func<string, string, string, Task<string?>>? RequestName { get; set; }
 
     // ---------------- Reminders ----------------
 
@@ -387,6 +393,11 @@ public sealed partial class MainViewModel : ObservableObject
         // One cross-account inbox at the top, anchored to the first account.
         if (Accounts.Count > 0) Views.Insert(0, new FolderItem(Accounts[0], SmartView.AllInboxes));
         GroupFoldersByAccount = Accounts.Count > 1;
+        SavedSearches.Clear();
+        if (Accounts.Count > 0)
+            foreach (var s in await _store.GetSavedSearchesAsync())
+                SavedSearches.Add(new FolderItem(Accounts.FirstOrDefault(a => a.Id == s.AccountId) ?? Accounts[0], s));
+        OnPropertyChanged(nameof(HasSavedSearches));
         _ = RefreshViewCountsAsync();
         _loadingSettings = true;
         ShowConversations = await _store.GetSettingAsync(ConversationsKey) == "1";
@@ -420,6 +431,13 @@ public sealed partial class MainViewModel : ObservableObject
         SelectedMessage = null;
         if (SelectedFolder is null) return;
         ListTitle = SelectedFolder.DisplayName;
+
+        if (SelectedFolder.Search is { } saved)
+        {
+            SearchText = saved.Query; // shown in the box so it can be read and refined
+            await ExecuteSearchAsync(saved.Query, saved.AccountId, saved.FolderId, saved.Name);
+            return;
+        }
 
         if (SelectedFolder.View is { } view)
         {
@@ -487,6 +505,12 @@ public sealed partial class MainViewModel : ObservableObject
     private IEnumerable<FolderItem> SourceFoldersFor(FolderItem view)
     {
         if (view.IsUnified) return Folders.Where(f => f.Kind == FolderKind.Inbox).ToList();
+        if (view.Search is { } search)
+        {
+            // A saved search re-reads the cache; Sync refreshes the folder it is scoped to, else Inbox and Sent of the account(s) it spans.
+            if (search.FolderId is { } id) return Folders.Where(f => f.Folder.Id == id).ToList();
+            return Folders.Where(f => (search.AccountId is null || f.Account.Id == search.AccountId) && f.Kind is FolderKind.Inbox or FolderKind.Sent).ToList();
+        }
         var kinds = view.View == SmartView.Waiting ? new[] { FolderKind.Sent, FolderKind.Inbox } : [FolderKind.Inbox];
         return kinds.Select(k => Folders.FirstOrDefault(f => f.Account.Id == view.Account.Id && f.Kind == k)).Where(f => f is not null)!;
     }
@@ -910,7 +934,7 @@ public sealed partial class MainViewModel : ObservableObject
         var selectedAccount = SelectedFolder?.Account.Id;
         await LoadAsync();
         if (selectedName is not null)
-            SelectedFolder = Folders.Concat(Views).FirstOrDefault(f => f.Account.Id == selectedAccount && f.Folder.FullName == selectedName) ?? SelectedFolder;
+            SelectedFolder = Folders.Concat(Views).Concat(SavedSearches).FirstOrDefault(f => f.Account.Id == selectedAccount && f.Folder.FullName == selectedName) ?? SelectedFolder;
     }
 
     // ---------------- Search ----------------
@@ -931,12 +955,26 @@ public sealed partial class MainViewModel : ObservableObject
             await LoadMessagesAsync();
             return;
         }
-        var account = CurrentAccount;
-        var allAccounts = SelectedFolder is { IsUnified: true }; // searching from All inboxes covers every account
-        if (SearchAllFolders && account is not null && !IsBusy)
+        var (accountId, folderId) = SearchScope();
+        await ExecuteSearchAsync(SearchText, accountId, folderId, $"Search: {SearchText}");
+    }
+
+    /// <summary>What the search box searches right now: (null, null) is every account; (account, null) one account; (account, folder) one folder.</summary>
+    private (long? accountId, long? folderId) SearchScope()
+    {
+        // Searching from All inboxes, or from a saved search that spans accounts, covers every account.
+        var allAccounts = SelectedFolder is { IsUnified: true } || SelectedFolder?.Search is { AccountId: null };
+        long? folderId = SearchAllFolders || SelectedFolder is null or { IsView: true } ? null : SelectedFolder.Folder.Id;
+        return (allAccounts ? null : CurrentAccount?.Id, folderId);
+    }
+
+    /// <summary>Runs a query against the cache and shows the hits. Shared by the search box and saved searches.</summary>
+    private async Task ExecuteSearchAsync(string query, long? accountId, long? folderId, string title)
+    {
+        if (folderId is null && !IsBusy)
         {
             // Folders that were never opened have nothing cached, so a whole-account search would silently skip them.
-            var unsynced = Folders.Where(f => (allAccounts || f.Account.Id == account.Id) && f.Folder.HighestUid == 0 && f.Kind != FolderKind.Trash && f.Kind != FolderKind.Junk).ToList();
+            var unsynced = Folders.Where(f => (accountId is null || f.Account.Id == accountId) && f.Folder.HighestUid == 0 && f.Kind != FolderKind.Trash && f.Kind != FolderKind.Junk).ToList();
             if (unsynced.Count > 0)
             {
                 await RunBusyAsync("Syncing folders for search...", async () =>
@@ -953,16 +991,83 @@ public sealed partial class MainViewModel : ObservableObject
 
         Messages.Clear();
         SelectedMessage = null;
-        ListTitle = $"Search: {SearchText}";
-        long? folderId = SearchAllFolders || SelectedFolder is null or { IsView: true } ? null : SelectedFolder.Folder.Id;
-        foreach (var m in await _store.SearchAsync(SearchText, allAccounts ? null : account?.Id, folderId))
+        ListTitle = title;
+        var allAccounts = accountId is null && Accounts.Count > 1;
+        foreach (var m in await _store.SearchAsync(query, accountId, folderId))
         {
-            if (allAccounts && Accounts.Count > 1) m.AccountName = AccountOf(m).Name;
+            if (allAccounts) m.AccountName = AccountOf(m).Name;
             Messages.Add(m);
         }
-        var scope = SearchAllFolders ? (allAccounts && Accounts.Count > 1 ? "all accounts" : "all folders") : (SelectedFolder?.DisplayName ?? "this folder");
+        var scope = folderId is { } id ? (Folders.FirstOrDefault(f => f.Folder.Id == id)?.DisplayName ?? "this folder")
+            : allAccounts ? "all accounts" : "all folders";
         ListSubtitle = $"{Messages.Count} result{(Messages.Count == 1 ? "" : "s")} in {scope}";
         StatusText = ListSubtitle;
+    }
+
+    // ---------------- Saved searches ----------------
+
+    /// <summary>Keeps the current search box query and scope as a sidebar entry.</summary>
+    [RelayCommand]
+    private async Task SaveSearchAsync()
+    {
+        var query = SearchText.Trim();
+        if (query.Length == 0 || RequestName is null) return;
+        if (Accounts.Count == 0) { StatusText = "Add an account first."; return; }
+        var name = await RequestName("Save search", "Name for this search", query);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var (accountId, folderId) = SearchScope();
+        var search = new SavedSearch { Name = name.Trim(), Query = query, AccountId = accountId, FolderId = folderId };
+        await _store.UpsertSavedSearchAsync(search);
+        var item = new FolderItem(Accounts.FirstOrDefault(a => a.Id == accountId) ?? Accounts[0], search);
+        SavedSearches.Add(item);
+        OnPropertyChanged(nameof(HasSavedSearches));
+        SelectedFolder = item;
+        StatusText = $"Saved search \"{search.Name}\". It re-runs each time you open it.";
+    }
+
+    [RelayCommand]
+    private async Task RenameSavedSearchAsync(FolderItem? item)
+    {
+        if (item?.Search is not { } search || RequestName is null) return;
+        var name = await RequestName("Rename search", "New name", search.Name);
+        if (string.IsNullOrWhiteSpace(name) || name.Trim() == search.Name) return;
+        search.Name = name.Trim();
+        await _store.UpsertSavedSearchAsync(search);
+        item.Refresh();
+        if (ReferenceEquals(item, SelectedFolder)) ListTitle = search.Name;
+    }
+
+    /// <summary>Points the saved search at whatever is in the search box now, with the current scope.</summary>
+    [RelayCommand]
+    private async Task UpdateSavedSearchAsync(FolderItem? item)
+    {
+        if (item?.Search is not { } search) return;
+        var query = SearchText.Trim();
+        if (query.Length == 0) { StatusText = "Type the new search first, then choose this again."; return; }
+        var (accountId, folderId) = SearchScope();
+        search.Query = query;
+        search.AccountId = accountId;
+        search.FolderId = folderId;
+        await _store.UpsertSavedSearchAsync(search);
+        item.Refresh();
+        StatusText = $"\"{search.Name}\" now searches: {query}";
+        if (ReferenceEquals(item, SelectedFolder)) await LoadMessagesAsync();
+    }
+
+    [RelayCommand]
+    private async Task DeleteSavedSearchAsync(FolderItem? item)
+    {
+        if (item?.Search is not { } search) return;
+        await _store.DeleteSavedSearchAsync(search.Id);
+        var wasSelected = ReferenceEquals(item, SelectedFolder);
+        SavedSearches.Remove(item);
+        OnPropertyChanged(nameof(HasSavedSearches));
+        if (wasSelected)
+        {
+            SearchText = "";
+            SelectedFolder = Folders.FirstOrDefault(f => f.Account.Id == item.Account.Id && f.Kind == FolderKind.Inbox) ?? Folders.FirstOrDefault();
+        }
+        StatusText = $"Removed saved search \"{search.Name}\". Your mail is untouched.";
     }
 
     // ---------------- Message actions ----------------
@@ -1018,7 +1123,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     public bool CanDropOn(FolderItem target) =>
         SelectedFolder is not null && !target.IsView && target.Kind != FolderKind.Drafts
-        && (SelectedFolder.IsUnified || target.Account.Id == SelectedFolder.Account.Id);
+        && (SelectedFolder.IsUnified || SelectedFolder.Search is { AccountId: null } || target.Account.Id == SelectedFolder.Account.Id);
 
     /// <summary>Drag-and-drop move. Messages already in the target, or from another account, are skipped; counts update without a full reload so search results stay put.</summary>
     public async Task MoveMessagesAsync(IReadOnlyList<MessageSummary> messages, FolderItem target)

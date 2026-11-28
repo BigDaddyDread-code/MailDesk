@@ -66,6 +66,13 @@ public interface IMailStore
     Task<IReadOnlyList<ThreadFact>> GetThreadFactsAsync(long accountId, bool includeDone, CancellationToken ct = default);
     Task SetThreadFactDoneAsync(long factId, bool done, CancellationToken ct = default);
 
+    // Saved searches
+    /// <summary>Every saved search in sidebar order.</summary>
+    Task<IReadOnlyList<SavedSearch>> GetSavedSearchesAsync(CancellationToken ct = default);
+    /// <summary>Inserts (Id 0, placed last) or updates by Id. Returns the id.</summary>
+    Task<long> UpsertSavedSearchAsync(SavedSearch search, CancellationToken ct = default);
+    Task DeleteSavedSearchAsync(long id, CancellationToken ct = default);
+
     // Calendar
     Task<IReadOnlyList<CalendarItem>> GetCalendarItemsAsync(long accountId, long fromUtcMs, long toUtcMs, CancellationToken ct = default);
     Task<CalendarItem?> GetCalendarItemAsync(long accountId, string uid, CancellationToken ct = default);

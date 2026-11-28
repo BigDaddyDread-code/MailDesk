@@ -370,6 +370,52 @@ public sealed class SqliteMailStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Saved_searches_keep_sidebar_order_update_in_place_and_follow_their_account()
+    {
+        var (account, folder) = await SeedAsync();
+        var other = new Account { Name = "Second", Email = "s@example.com", ImapHost = "imap.example.com", Username = "s", ProtectedPassword = "x" };
+        await _store.UpsertAccountAsync(other);
+
+        var invoices = new SavedSearch { AccountId = account.Id, FolderId = folder.Id, Name = " Invoices ", Query = "invoice has:attachment " };
+        var everywhere = new SavedSearch { AccountId = null, Name = "From Pat", Query = "from:pat" };
+        var second = new SavedSearch { AccountId = other.Id, Name = "Second only", Query = "after:2026-01-01" };
+        await _store.UpsertSavedSearchAsync(invoices);
+        await _store.UpsertSavedSearchAsync(everywhere);
+        await _store.UpsertSavedSearchAsync(second);
+
+        var all = await _store.GetSavedSearchesAsync();
+        Assert.Equal(["Invoices", "From Pat", "Second only"], all.Select(s => s.Name).ToArray());
+        Assert.Equal("invoice has:attachment", all[0].Query);          // trimmed
+        Assert.Equal(folder.Id, all[0].FolderId);
+        Assert.Null(all[1].AccountId);                                   // spans every account
+        Assert.True(all[0].SortOrder < all[1].SortOrder && all[1].SortOrder < all[2].SortOrder);
+        Assert.True(all[0].CreatedUtcMs > 0);
+
+        // Rename and re-scope in place: same id, same position.
+        invoices.Name = "Bills";
+        invoices.FolderId = null;
+        var id = await _store.UpsertSavedSearchAsync(invoices);
+        all = await _store.GetSavedSearchesAsync();
+        Assert.Equal(id, all[0].Id);
+        Assert.Equal("Bills", all[0].Name);
+        Assert.Null(all[0].FolderId);
+
+        // Deleting a folder a search was scoped to only clears the scope; deleting an account removes its searches.
+        var scoped = new SavedSearch { AccountId = account.Id, FolderId = folder.Id, Name = "Scoped", Query = "x" };
+        await _store.UpsertSavedSearchAsync(scoped);
+        await _store.DeleteFolderAsync(folder.Id);
+        Assert.Null((await _store.GetSavedSearchesAsync()).Single(s => s.Id == scoped.Id).FolderId);
+
+        await _store.DeleteAccountAsync(other.Id);
+        all = await _store.GetSavedSearchesAsync();
+        Assert.DoesNotContain(all, s => s.Name == "Second only");
+        Assert.Contains(all, s => s.Name == "From Pat"); // account-less searches survive
+
+        await _store.DeleteSavedSearchAsync(everywhere.Id);
+        Assert.DoesNotContain(await _store.GetSavedSearchesAsync(), s => s.Id == everywhere.Id);
+    }
+
+    [Fact]
     public void Fts_query_builder_quotes_terms_and_adds_prefix()
     {
         Assert.Equal("\"loan\"* \"variat\"*", SqliteMailStore.ToFtsQuery("loan variat"));

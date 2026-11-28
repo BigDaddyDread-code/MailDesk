@@ -255,6 +255,20 @@ Operators narrow the search further and can be combined with free text or used o
 The Ask-your-mailbox assistant knows the same operators, so "what did the council send me in March with an attachment?"
 becomes one search rather than a scan.
 
+### Saved searches
+
+Once there is something in the search box, a save icon appears at its right end. It asks for a name and adds the search to
+a **Saved searches** list in the sidebar, between the views and the folders. Opening one re-runs the query against the
+cache, so it is a live view: `from:council has:attachment after:2026-01` stays current as mail arrives. The query is put
+back in the search box when the entry is opened, so it can be read and refined; pressing Enter searches with the refined
+text, and **Replace with current search** on the entry's right-click menu makes that the saved query.
+
+A search keeps the scope it was saved with: one folder when the toggle said **This folder**, otherwise every folder of the
+account, or every account when it was started from **All inboxes**. **Sync** on a saved search refreshes the folder it is
+scoped to, else Inbox and Sent of the accounts it spans. Rename and remove are on the same menu; removing an entry never
+touches mail. The assistant can see them through `list_saved_searches` and runs one by handing its query to
+`search_messages`.
+
 ## Compose, reply, forward
 
 **New message** in the top bar opens the compose window: To, Cc/Bcc, subject, plain-text body, file attachments.
@@ -292,7 +306,7 @@ act on while staying in control. Measured against five workspaces, this is the s
 | Inbox | What arrived and needs attention? | All inboxes across accounts, Priority view, local classification, conversation view, rules, drag and drop, multi-select delete, remote-image control | Snooze, keyboard command palette, thread-wide move and delete |
 | Actions | What do I need to do? | Tasks, agent task proposals, Summarise with Add task / Add to calendar, calendar with invitations | Deadlines extracted automatically from new mail, templates and quick steps |
 | Waiting | Who owes me a response? | Waiting view with reply matching by thread headers and subject, `list_waiting` for the assistant, reminders after a threshold with one-click nudge drafts, snooze and dismiss | Reminders as Windows notifications when the app is in the background |
-| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, conversation timeline, decisions / commitments / open questions per thread linked to their source message, Commitments ledger across conversations, `get_conversation` and `list_commitments` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, saved searches, automatic analysis of new replies in already-analysed threads |
+| Knowledge | What was discussed, agreed or promised? | Search operators, folder search, saved searches as live sidebar views, conversation timeline, decisions / commitments / open questions per thread linked to their source message, Commitments ledger across conversations, `get_conversation`, `list_commitments` and `list_saved_searches` for the assistant, Ask-your-mailbox with sources, Summarise | Semantic search, automatic analysis of new replies in already-analysed threads |
 | Automation | What can the system handle safely? | Rules engine, agent proposals with review, approval-only path to the mailbox | Multi-step rules (save attachment, read invoice number, raise approval), run logs per rule |
 
 Everything the AI does is proposal-only: it never sends, deletes or changes a record on its own, and the review pane shows
@@ -301,10 +315,9 @@ what it wants to do before anything happens. That rule holds for every item in t
 Engineering next steps, in order:
 
 1. Per-account sync diagnostics; IMAP IDLE for push updates; flag resync for already-cached messages.
-2. Saved searches as sidebar views, built on the search operators above.
-3. Windows notifications for new priority mail and reminders while the app is in the background.
-4. Keyboard shortcuts and a command palette.
-5. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.
+2. Windows notifications for new priority mail and reminders while the app is in the background.
+3. Keyboard shortcuts and a command palette.
+4. OAuth2 for Gmail and Outlook; phishing and spoofing warnings on the reader; attachment library.
 
 ## License
 

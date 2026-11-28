@@ -51,6 +51,8 @@ public sealed class MailboxToolbox
             new { type = "object", properties = new { message_id = new { type = "integer" } }, required = new[] { "message_id" }, additionalProperties = false }),
         new("list_folders", "Folders with counts.",
             new { type = "object", properties = new { }, additionalProperties = false }),
+        new("list_saved_searches", "The searches the user keeps in the sidebar: name and query. Run one by passing its query to search_messages.",
+            new { type = "object", properties = new { }, additionalProperties = false }),
         new("list_events", "Calendar entries between two dates (default today to 14 days ahead): title, start, end, location, organiser, the user's response.",
             new { type = "object", properties = new
             {
@@ -103,6 +105,7 @@ public sealed class MailboxToolbox
                 "get_message" => await GetAsync(input, ct),
                 "get_conversation" => await ConversationAsync(input, ct),
                 "list_folders" => await FoldersAsync(ct),
+                "list_saved_searches" => await SavedSearchesAsync(ct),
                 "list_events" => await EventsAsync(Str(input, "from_date"), Str(input, "to_date"), ct),
                 "list_tasks" => await TasksAsync(Bool(input, "include_done"), ct),
                 "list_waiting" => await ViewAsync(Str(input, "view"), Int(input, "limit", 30, 100), ct),
@@ -252,6 +255,14 @@ public sealed class MailboxToolbox
     {
         var folders = await _store.GetFoldersAsync(_account.Id, ct);
         return JsonSerializer.Serialize(folders.Select(f => new { name = f.DisplayName, kind = f.Kind.ToString(), total = f.TotalCount, unread = f.UnreadCount }), Json);
+    }
+
+    private async Task<string> SavedSearchesAsync(CancellationToken ct)
+    {
+        var searches = await _store.GetSavedSearchesAsync(ct);
+        return JsonSerializer.Serialize(searches
+            .Where(s => s.AccountId is null || s.AccountId == _account.Id)
+            .Select(s => new { name = s.Name, query = s.Query, scope = s.AccountId is null ? "all accounts" : "this account" }), Json);
     }
 
     private async Task<string> EventsAsync(string? fromText, string? toText, CancellationToken ct)
